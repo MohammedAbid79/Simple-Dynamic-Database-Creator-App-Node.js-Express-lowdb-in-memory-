@@ -4,8 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Sign In — Dynamic DB Creator</title>
-  <link rel="stylesheet" href="/fonts/plus-jakarta-sans/wght.css" />
   <style>
+    @font-face {
+      font-family: 'Plus Jakarta Sans Variable';
+      font-style: normal;
+      font-display: swap;
+      font-weight: 200 800;
+      src: url('/fonts/plus-jakarta-sans-latin-wght-normal.woff2') format('woff2-variations');
+    }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
@@ -60,12 +66,6 @@
       -webkit-text-fill-color: transparent;
       background-clip: text;
       margin-bottom: 4px;
-    }
-
-    .subtitle {
-      font-size: 12px;
-      color: rgba(255, 255, 255, 0.35);
-      letter-spacing: 0.02em;
     }
 
     /* ── Tabs ── */
@@ -186,7 +186,6 @@
     <div class="card">
       <div class="header">
         <div class="wordmark">Dynamic DB Creator</div>
-        <div class="subtitle">Node.js &middot; Express &middot; lowdb</div>
       </div>
 
       <div class="tabs">

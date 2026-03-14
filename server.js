@@ -88,9 +88,6 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/fonts/inter', express.static(
   path.join(__dirname, 'node_modules/@fontsource/inter')
 ));
-app.use('/fonts/plus-jakarta-sans', express.static(
-  path.join(__dirname, 'node_modules/@fontsource-variable/plus-jakarta-sans')
-));
 
 app.use(session({
   secret: 'dyndb-secret-key-change-in-prod',
