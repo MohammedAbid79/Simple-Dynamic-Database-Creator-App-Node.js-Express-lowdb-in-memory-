@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Dynamic DB Creator</title>
-  <link rel="stylesheet" href="/style.css?v=4" />
+  <title>FluxDB</title>
+  <link rel="stylesheet" href="/style.css?v=5" />
 </head>
 <body>
   <!-- ── App Shell ── -->
@@ -12,18 +12,70 @@
     <!-- Sidebar -->
     <aside id="sidebar">
       <div class="sidebar-header">
-        <span class="logo-icon small">&#128196;</span>
-        <span class="sidebar-title">DynDB</span>
+        <div class="brand">
+          <svg class="brand-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="M11.5 2L5 11h5.5l-1.5 7 8-10h-5.5z" fill="var(--accent)"/>
+          </svg>
+          <span class="sidebar-title">FluxDB</span>
+        </div>
+        <button class="hamburger-btn" id="sidebar-toggle" title="Toggle sidebar" aria-label="Toggle sidebar">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+            <path d="M3 5h14M3 10h14M3 15h14"/>
+          </svg>
+        </button>
       </div>
+
       <nav>
-        <button class="nav-btn active" data-view="databases">&#128197; Databases</button>
-        <button class="nav-btn" id="nav-users" data-view="users" style="display:none">&#128100; Users</button>
-        <button class="nav-btn" id="nav-activity" data-view="activity" style="display:none">&#128336; Activity Log</button>
-        <button class="nav-btn" id="nav-apikeys" data-view="apikeys" style="display:none">&#128273; API Keys</button>
+        <button class="nav-btn active" data-view="databases" title="Databases">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <ellipse cx="10" cy="5.5" rx="6.5" ry="2.3"/>
+            <path d="M3.5 5.5v4c0 1.27 2.91 2.3 6.5 2.3s6.5-1.03 6.5-2.3v-4"/>
+            <path d="M3.5 9.5v4c0 1.27 2.91 2.3 6.5 2.3s6.5-1.03 6.5-2.3v-4"/>
+          </svg>
+          <span class="nav-label">Databases</span>
+        </button>
+
+        <button class="nav-btn" id="nav-users" data-view="users" title="Users" style="display:none">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="8" cy="6.5" r="3"/>
+            <path d="M2 17c0-3.31 2.69-6 6-6s6 2.69 6 6"/>
+            <path d="M14.5 4.5a2.5 2.5 0 0 1 0 5"/>
+            <path d="M18 17a4 4 0 0 0-4-4"/>
+          </svg>
+          <span class="nav-label">Users</span>
+        </button>
+
+        <button class="nav-btn" id="nav-activity" data-view="activity" title="Activity Log" style="display:none">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="10" cy="10" r="7.5"/>
+            <path d="M10 6v4.5l3 1.75"/>
+          </svg>
+          <span class="nav-label">Activity Log</span>
+        </button>
+
+        <button class="nav-btn" id="nav-apikeys" data-view="apikeys" title="API Keys" style="display:none">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="7.5" cy="10" r="4.5"/>
+            <path d="M12 10h6"/>
+            <path d="M15.5 7.5v5"/>
+          </svg>
+          <span class="nav-label">API Keys</span>
+        </button>
       </nav>
+
       <div class="sidebar-footer">
-        <div id="user-badge"></div>
-        <button id="logout-btn" class="btn btn-outline btn-sm">Sign Out</button>
+        <div class="user-profile">
+          <div class="user-avatar" id="user-avatar">?</div>
+          <div id="user-badge" class="user-info"></div>
+        </div>
+        <button id="logout-btn" class="btn btn-outline btn-sm logout-btn-inner">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M7.5 3.5H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h3.5"/>
+            <path d="M13 13.5l4-3.5-4-3.5"/>
+            <path d="M17 10H8.5"/>
+          </svg>
+          <span class="nav-label">Sign Out</span>
+        </button>
       </div>
     </aside>
 
@@ -59,10 +111,10 @@
         <div id="record-list" class="table-wrap"></div>
       </div>
 
-      <!-- API Keys View (all users) -->
+      <!-- API Keys View -->
       <div id="view-apikeys" class="view">
         <div class="view-header">
-          <h2>&#128273; API Keys</h2>
+          <h2>API Keys</h2>
           <button id="btn-create-key" class="btn btn-primary">+ Generate Key</button>
         </div>
         <p class="apikey-hint">Use your API key with <code>X-API-Key: &lt;key&gt;</code> or <code>Authorization: Bearer &lt;key&gt;</code>. Keys are shown only once on creation.</p>
@@ -72,7 +124,7 @@
       <!-- Activity Log View (admin only) -->
       <div id="view-activity" class="view">
         <div class="view-header">
-          <h2>&#128336; Activity Log</h2>
+          <h2>Activity Log</h2>
           <button id="btn-refresh-activity" class="btn btn-outline btn-sm">&#8635; Refresh</button>
         </div>
         <div id="activity-list"></div>
@@ -94,6 +146,6 @@
   <!-- Toast -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/app.js?v=2"></script>
+  <script src="/app.js?v=3"></script>
 </body>
 </html>

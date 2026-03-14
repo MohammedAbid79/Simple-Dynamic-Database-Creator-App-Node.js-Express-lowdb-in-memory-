@@ -64,6 +64,11 @@ document.getElementById('logout-btn').onclick = async () => {
   window.location.href = '/login';
 };
 
+/* ── Sidebar toggle ─────────────────────────────────────────────────────────── */
+document.getElementById('sidebar-toggle').addEventListener('click', () => {
+  document.getElementById('sidebar').classList.toggle('collapsed');
+});
+
 /* ── Navigation ────────────────────────────────────────────────────────────── */
 document.querySelectorAll('.nav-btn[data-view]').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -91,9 +96,20 @@ function showView(id) {
 async function bootApp() {
   showScreen('app-screen');
 
+  // Avatar with initials
+  const avatar = document.getElementById('user-avatar');
+  const initials = currentUser.username.slice(0, 2).toUpperCase();
+  avatar.textContent = initials;
+  const avatarColors = [
+    ['#6574ff','#9da8ff'], ['#2dce89','#4deaaa'], ['#ffa94d','#ffc57a'],
+    ['#f06565','#f58f8f'], ['#4dbbff','#7acfff'], ['#c46aff','#d994ff'],
+  ];
+  const ci = [...currentUser.username].reduce((s, c) => s + c.charCodeAt(0), 0) % avatarColors.length;
+  avatar.style.background = `linear-gradient(135deg, ${avatarColors[ci][0]} 0%, ${avatarColors[ci][1]} 100%)`;
+
   // User badge
   const badge = document.getElementById('user-badge');
-  badge.innerHTML = `<strong>${currentUser.username}</strong>
+  badge.innerHTML = `<span class="user-display-name">${esc(currentUser.username)}</span>
     <span class="role-tag role-${currentUser.role}">${currentUser.role.toUpperCase()}</span>`;
 
   const role    = currentUser.role;
