@@ -42,7 +42,12 @@ body {
   height: 100vh;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   font-variant-numeric: tabular-nums;
+  font-size: 15px;
+  line-height: 1.6;
+  letter-spacing: -0.011em;
+  font-feature-settings: "kern" 1, "liga" 1, "calt" 1, "ss03" 1;
 }
 
 /* ── Screen routing ───────────────────────────────────────────────────────── */
