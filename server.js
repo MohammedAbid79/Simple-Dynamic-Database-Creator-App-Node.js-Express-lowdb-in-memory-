@@ -84,9 +84,12 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Self-hosted Inter font (no internet required)
+// Self-hosted fonts (no internet required)
 app.use('/fonts/inter', express.static(
   path.join(__dirname, 'node_modules/@fontsource/inter')
+));
+app.use('/fonts/plus-jakarta-sans', express.static(
+  path.join(__dirname, 'node_modules/@fontsource-variable/plus-jakarta-sans')
 ));
 
 app.use(session({
