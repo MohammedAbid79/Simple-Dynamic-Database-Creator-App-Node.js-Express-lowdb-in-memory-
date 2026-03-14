@@ -311,18 +311,57 @@ function validateRecordData(data, fields) {
   const result = {};
   for (const field of fields) {
     const val = data[field.name];
-    if (val === undefined || val === null || val === '') {
+    const isEmpty = val === undefined || val === null || val === '';
+
+    if (isEmpty) {
+      if (field.required) return { error: `"${field.name}" is required` };
       result[field.name] = null;
       continue;
     }
-    if (field.type === 'number' && isNaN(Number(val))) {
-      return { error: `Field "${field.name}" must be a number` };
+
+    if (field.type === 'number') {
+      if (isNaN(Number(val))) return { error: `"${field.name}" must be a number` };
+      const n = Number(val);
+      if (field.min != null && n < Number(field.min)) return { error: `"${field.name}" must be ≥ ${field.min}` };
+      if (field.max != null && n > Number(field.max)) return { error: `"${field.name}" must be ≤ ${field.max}` };
     }
+
     if (field.type === 'boolean' && !['true', 'false', true, false].includes(val)) {
-      return { error: `Field "${field.name}" must be boolean` };
+      return { error: `"${field.name}" must be true or false` };
     }
+
+    if (field.type === 'string') {
+      const s = String(val);
+      if (field.minLength != null && s.length < Number(field.minLength))
+        return { error: `"${field.name}" must be at least ${field.minLength} characters` };
+      if (field.maxLength != null && s.length > Number(field.maxLength))
+        return { error: `"${field.name}" must be at most ${field.maxLength} characters` };
+      if (field.pattern) {
+        try {
+          if (!new RegExp(field.pattern).test(s))
+            return { error: `"${field.name}" does not match the required pattern` };
+        } catch (_) { /* invalid regex, skip */ }
+      }
+    }
+
+    if (field.type === 'date') {
+      const d = new Date(val);
+      if (isNaN(d.getTime())) return { error: `"${field.name}" must be a valid date` };
+      if (field.minDate && new Date(val) < new Date(field.minDate))
+        return { error: `"${field.name}" must be on or after ${field.minDate}` };
+      if (field.maxDate && new Date(val) > new Date(field.maxDate))
+        return { error: `"${field.name}" must be on or before ${field.maxDate}` };
+    }
+
+    // Enum check — applies to all types
+    if (field.enumValues && Array.isArray(field.enumValues) && field.enumValues.length > 0) {
+      const sv = String(val === true ? 'true' : val === false ? 'false' : val);
+      if (!field.enumValues.includes(sv))
+        return { error: `"${field.name}" must be one of: ${field.enumValues.join(', ')}` };
+    }
+
     result[field.name] =
-      field.type === 'number' ? Number(val) :
+      field.type === 'number'  ? Number(val) :
       field.type === 'boolean' ? (val === 'true' || val === true) :
       String(val);
   }

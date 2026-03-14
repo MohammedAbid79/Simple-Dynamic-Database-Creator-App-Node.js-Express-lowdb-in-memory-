@@ -161,7 +161,7 @@ async function loadDatabases() {
       <div class="db-card-meta">Created by ${esc(d.createdBy)} &bull; ${fmtDate(d.createdAt)}</div>
       <div class="db-card-count"><span class="record-count-badge">${d.recordCount ?? 0} record${(d.recordCount ?? 0) !== 1 ? 's' : ''}</span></div>
       <div class="db-card-fields">
-        ${d.fields.map(f => `<span class="field-chip">${esc(f.name)}<span class="badge badge-${f.type}" style="margin-left:4px">${f.type}</span></span>`).join('')}
+        ${d.fields.map(f => `<span class="field-chip">${esc(f.name)}${f.required ? '<span style="color:var(--danger);font-size:.7rem">*</span>' : ''}<span class="badge badge-${f.type}" style="margin-left:4px">${f.type}</span></span>`).join('')}
       </div>
       <div class="db-card-actions" onclick="event.stopPropagation()">
         <button class="btn btn-sm btn-outline" onclick="openRecords('${d.id}')">&#128202; Open</button>
@@ -192,7 +192,7 @@ document.getElementById('btn-create-db').onclick = () => {
 function buildDbForm(db) {
   const nameVal   = db ? esc(db.name) : '';
   const fieldsHtml = db
-    ? db.fields.map(f => fieldRow(f.name, f.type)).join('')
+    ? db.fields.map(f => fieldRow(f)).join('')
     : fieldRow();
   return `
     <label>Database Name</label>
@@ -202,15 +202,83 @@ function buildDbForm(db) {
     <button type="button" class="btn btn-outline btn-sm" style="margin-top:8px" onclick="addFieldRow()">+ Add Field</button>`;
 }
 
-function fieldRow(name = '', type = 'string') {
+function fieldRow(f = {}) {
+  const name     = f.name || '';
+  const type     = f.type || 'string';
+  const required = !!f.required;
+  const hasConstraints = required || f.minLength != null || f.maxLength != null || f.pattern ||
+    f.min != null || f.max != null || f.minDate || f.maxDate ||
+    (Array.isArray(f.enumValues) && f.enumValues.length > 0);
   return `<div class="field-row">
-    <input type="text" placeholder="field name" value="${esc(name)}" class="field-name" />
-    <select class="field-type">
-      ${['string','number','boolean','date'].map(t =>
-        `<option value="${t}"${t===type?' selected':''}>${t}</option>`).join('')}
-    </select>
-    <button type="button" class="remove-field" onclick="this.closest('.field-row').remove()" title="Remove field">&times;</button>
+    <div class="field-row-main">
+      <input type="text" placeholder="field name" value="${esc(name)}" class="field-name" />
+      <select class="field-type" onchange="updateConstraintsPanel(this)">
+        ${['string','number','boolean','date'].map(t =>
+          `<option value="${t}"${t===type?' selected':''}>${t}</option>`).join('')}
+      </select>
+      <label class="field-required-wrap" title="Required field">
+        <input type="checkbox" class="field-required"${required?' checked':''} /> Req
+      </label>
+      <button type="button" class="btn-constraints-toggle${hasConstraints?' active':''}" onclick="toggleConstraints(this)" title="Validation rules">⚙</button>
+      <button type="button" class="remove-field" onclick="this.closest('.field-row').remove()" title="Remove field">&times;</button>
+    </div>
+    <div class="field-constraints-panel${hasConstraints?'':' hidden'}">
+      ${buildConstraintsPanel(type, f)}
+    </div>
   </div>`;
+}
+
+function buildConstraintsPanel(type, f = {}) {
+  let typeHtml = '';
+  if (type === 'string') {
+    typeHtml = `<div class="constraint-grid">
+      <div>
+        <label class="constraint-label">Min length</label>
+        <input type="number" class="constraint-input fc-minLength" min="0" placeholder="0" value="${f.minLength != null ? f.minLength : ''}" />
+      </div>
+      <div>
+        <label class="constraint-label">Max length</label>
+        <input type="number" class="constraint-input fc-maxLength" min="0" placeholder="∞" value="${f.maxLength != null ? f.maxLength : ''}" />
+      </div>
+    </div>
+    <label class="constraint-label">Pattern (regex)</label>
+    <input type="text" class="constraint-input fc-pattern" placeholder="e.g. ^[a-z]+$" value="${esc(f.pattern || '')}" />`;
+  } else if (type === 'number') {
+    typeHtml = `<div class="constraint-grid">
+      <div>
+        <label class="constraint-label">Min value</label>
+        <input type="number" class="constraint-input fc-min" step="any" placeholder="-∞" value="${f.min != null ? f.min : ''}" />
+      </div>
+      <div>
+        <label class="constraint-label">Max value</label>
+        <input type="number" class="constraint-input fc-max" step="any" placeholder="+∞" value="${f.max != null ? f.max : ''}" />
+      </div>
+    </div>`;
+  } else if (type === 'date') {
+    typeHtml = `<div class="constraint-grid">
+      <div>
+        <label class="constraint-label">Earliest date</label>
+        <input type="date" class="constraint-input fc-minDate" value="${esc(f.minDate || '')}" />
+      </div>
+      <div>
+        <label class="constraint-label">Latest date</label>
+        <input type="date" class="constraint-input fc-maxDate" value="${esc(f.maxDate || '')}" />
+      </div>
+    </div>`;
+  }
+  return typeHtml + `<label class="constraint-label"${typeHtml ? ' style="margin-top:8px"' : ''}>Allowed values <span style="font-weight:400;opacity:.7">(comma-separated, leave blank for any)</span></label>
+    <input type="text" class="constraint-input fc-enum" placeholder="e.g. draft, active, archived" value="${esc((Array.isArray(f.enumValues) ? f.enumValues : []).join(', '))}" />`;
+}
+
+function toggleConstraints(btn) {
+  const panel = btn.closest('.field-row').querySelector('.field-constraints-panel');
+  panel.classList.toggle('hidden');
+  btn.classList.toggle('active');
+}
+
+function updateConstraintsPanel(select) {
+  const panel = select.closest('.field-row').querySelector('.field-constraints-panel');
+  panel.innerHTML = buildConstraintsPanel(select.value);
 }
 
 function addFieldRow() {
@@ -223,7 +291,33 @@ function collectFields() {
   for (const row of rows) {
     const name = row.querySelector('.field-name').value.trim();
     const type = row.querySelector('.field-type').value;
-    if (name) result.push({ name, type });
+    if (!name) continue;
+
+    const field = { name, type };
+    const reqEl = row.querySelector('.field-required');
+    if (reqEl && reqEl.checked) field.required = true;
+
+    const get = cls => { const el = row.querySelector(cls); return el ? el.value.trim() : ''; };
+
+    if (type === 'string') {
+      const minL = get('.fc-minLength'), maxL = get('.fc-maxLength'), pat = get('.fc-pattern');
+      if (minL !== '') field.minLength = Number(minL);
+      if (maxL !== '') field.maxLength = Number(maxL);
+      if (pat)         field.pattern   = pat;
+    } else if (type === 'number') {
+      const min = get('.fc-min'), max = get('.fc-max');
+      if (min !== '') field.min = Number(min);
+      if (max !== '') field.max = Number(max);
+    } else if (type === 'date') {
+      const minD = get('.fc-minDate'), maxD = get('.fc-maxDate');
+      if (minD) field.minDate = minD;
+      if (maxD) field.maxDate = maxD;
+    }
+
+    const enumVal = get('.fc-enum');
+    if (enumVal) field.enumValues = enumVal.split(',').map(s => s.trim()).filter(Boolean);
+
+    result.push(field);
   }
   return result;
 }
@@ -375,23 +469,52 @@ document.getElementById('btn-add-record').onclick = () => {
 
 function buildRecordForm(record) {
   return currentDb.fields.map(f => {
-    const val = record ? (record.data[f.name] ?? '') : '';
+    const val      = record ? (record.data[f.name] ?? '') : '';
+    const reqMark  = f.required ? '<span style="color:var(--danger);margin-left:3px">*</span>' : '';
+    const hint     = buildFieldHint(f);
     let input;
-    if (f.type === 'boolean') {
+    if (f.enumValues && f.enumValues.length > 0) {
+      input = `<select id="rf-${esc(f.name)}">
+        <option value="">— select —</option>
+        ${f.enumValues.map(v => `<option value="${esc(v)}"${String(val)===v?' selected':''}>${esc(v)}</option>`).join('')}
+      </select>`;
+    } else if (f.type === 'boolean') {
       input = `<select id="rf-${esc(f.name)}">
         <option value="">— select —</option>
         <option value="true"${val===true||val==='true'?' selected':''}>true</option>
         <option value="false"${val===false||val==='false'?' selected':''}>false</option>
       </select>`;
     } else if (f.type === 'date') {
-      input = `<input id="rf-${esc(f.name)}" type="date" value="${esc(val)}" />`;
+      input = `<input id="rf-${esc(f.name)}" type="date" value="${esc(val)}"
+        ${f.minDate ? `min="${esc(f.minDate)}"` : ''}
+        ${f.maxDate ? `max="${esc(f.maxDate)}"` : ''} />`;
     } else if (f.type === 'number') {
-      input = `<input id="rf-${esc(f.name)}" type="number" value="${esc(String(val))}" step="any" />`;
+      input = `<input id="rf-${esc(f.name)}" type="number" value="${esc(String(val))}" step="any"
+        ${f.min != null ? `min="${f.min}"` : ''}
+        ${f.max != null ? `max="${f.max}"` : ''} />`;
     } else {
-      input = `<input id="rf-${esc(f.name)}" type="text" value="${esc(String(val))}" />`;
+      input = `<input id="rf-${esc(f.name)}" type="text" value="${esc(String(val))}"
+        ${f.maxLength != null ? `maxlength="${f.maxLength}"` : ''} />`;
     }
-    return `<label>${esc(f.name)} <span class="badge badge-${f.type}">${f.type}</span></label>${input}`;
+    return `<label>${esc(f.name)}${reqMark} <span class="badge badge-${f.type}">${f.type}</span></label>${hint}${input}`;
   }).join('');
+}
+
+function buildFieldHint(f) {
+  const parts = [];
+  if (f.type === 'string') {
+    if (f.minLength != null) parts.push(`min ${f.minLength} chars`);
+    if (f.maxLength != null) parts.push(`max ${f.maxLength} chars`);
+    if (f.pattern)           parts.push(`pattern: ${esc(f.pattern)}`);
+  } else if (f.type === 'number') {
+    if (f.min != null) parts.push(`min: ${f.min}`);
+    if (f.max != null) parts.push(`max: ${f.max}`);
+  } else if (f.type === 'date') {
+    if (f.minDate) parts.push(`from: ${f.minDate}`);
+    if (f.maxDate) parts.push(`to: ${f.maxDate}`);
+  }
+  if (f.enumValues && f.enumValues.length) parts.push(`allowed: ${f.enumValues.map(v => esc(v)).join(', ')}`);
+  return parts.length ? `<div class="field-hint">${parts.join(' · ')}</div>` : '';
 }
 
 function collectRecordData() {

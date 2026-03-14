@@ -292,16 +292,19 @@ input:focus, select:focus, textarea:focus {
 select option { background: var(--surface2); }
 
 .field-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
   margin-bottom: 8px;
 }
 
-.field-row input { flex: 2; }
-.field-row select { flex: 1; }
+.field-row-main {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
 
-.field-row .remove-field {
+.field-row-main input { flex: 2; }
+.field-row-main select { flex: 1; min-width: 80px; }
+
+.field-row-main .remove-field {
   background: none;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -310,8 +313,83 @@ select option { background: var(--surface2); }
   cursor: pointer;
   font-size: 1rem;
   line-height: 1;
+  flex-shrink: 0;
 }
-.field-row .remove-field:hover { background: #3a1010; }
+.field-row-main .remove-field:hover { background: #3a1010; }
+
+.field-required-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: .78rem;
+  white-space: nowrap;
+  margin: 0 !important;
+  flex-shrink: 0;
+}
+.field-required-wrap input[type="checkbox"] {
+  width: auto;
+  flex: none;
+  cursor: pointer;
+}
+
+.btn-constraints-toggle {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  padding: 5px 8px;
+  cursor: pointer;
+  font-size: .85rem;
+  transition: background .15s, color .15s, border-color .15s;
+  flex-shrink: 0;
+}
+.btn-constraints-toggle:hover,
+.btn-constraints-toggle.active {
+  background: var(--surface2);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.field-constraints-panel {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+  padding: 12px 14px;
+  margin-bottom: 4px;
+}
+
+.constraint-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.constraint-label {
+  display: block;
+  font-size: .75rem;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  margin-top: 0 !important;
+}
+
+.constraint-input {
+  padding: 6px 10px;
+  font-size: .82rem;
+}
+
+.field-hint {
+  font-size: .74rem;
+  color: var(--text-muted);
+  margin-bottom: 5px;
+  padding: 3px 9px;
+  background: var(--surface2);
+  border-radius: 5px;
+  border-left: 2px solid var(--accent);
+}
 
 .error-msg { color: var(--danger); font-size: .8rem; margin-top: 8px; }
 .hidden { display: none !important; }
