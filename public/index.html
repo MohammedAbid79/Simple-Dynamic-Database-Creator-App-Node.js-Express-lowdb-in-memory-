@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dynamic DB Creator</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <!-- ── Login Screen ── -->
+  <div id="login-screen" class="screen active">
+    <div class="card login-card">
+      <div class="login-logo">
+        <span class="logo-icon">&#128196;</span>
+        <h1>Dynamic DB Creator</h1>
+        <p class="subtitle">Node.js · Express · lowdb in-memory</p>
+      </div>
+      <form id="login-form">
+        <label>Username</label>
+        <input id="l-username" type="text" placeholder="admin or guest" autocomplete="username" />
+        <label>Password</label>
+        <input id="l-password" type="password" placeholder="password" autocomplete="current-password" />
+        <button type="submit" class="btn btn-primary btn-full">Sign In</button>
+        <p id="login-error" class="error-msg hidden"></p>
+      </form>
+      <div class="login-hints">
+        <span><b>Admin</b> admin / admin123</span>
+        <span><b>Guest</b> guest / guest123</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── App Shell ── -->
+  <div id="app-screen" class="screen">
+    <!-- Sidebar -->
+    <aside id="sidebar">
+      <div class="sidebar-header">
+        <span class="logo-icon small">&#128196;</span>
+        <span class="sidebar-title">DynDB</span>
+      </div>
+      <nav>
+        <button class="nav-btn active" data-view="databases">&#128197; Databases</button>
+        <button class="nav-btn" id="nav-users" data-view="users" style="display:none">&#128100; Users</button>
+      </nav>
+      <div class="sidebar-footer">
+        <div id="user-badge"></div>
+        <button id="logout-btn" class="btn btn-outline btn-sm">Sign Out</button>
+      </div>
+    </aside>
+
+    <!-- Main content -->
+    <main id="main-content">
+      <!-- Databases View -->
+      <div id="view-databases" class="view active">
+        <div class="view-header">
+          <h2>Databases</h2>
+          <button id="btn-create-db" class="btn btn-primary" style="display:none">+ New Database</button>
+        </div>
+        <div id="db-list" class="grid-cards"></div>
+      </div>
+
+      <!-- Users View (admin only) -->
+      <div id="view-users" class="view">
+        <div class="view-header">
+          <h2>User Management</h2>
+          <button id="btn-create-user" class="btn btn-primary">+ New User</button>
+        </div>
+        <div id="user-list" class="table-wrap"></div>
+      </div>
+
+      <!-- Records View -->
+      <div id="view-records" class="view">
+        <div class="view-header">
+          <button id="btn-back-db" class="btn btn-ghost">&#8592; Back</button>
+          <h2 id="records-db-name">Records</h2>
+          <button id="btn-add-record" class="btn btn-primary">+ Add Record</button>
+        </div>
+        <div id="record-list" class="table-wrap"></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ── Modals ── -->
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal" id="modal-box">
+      <div class="modal-header">
+        <h3 id="modal-title">Modal</h3>
+        <button class="modal-close" id="modal-close-btn">&times;</button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
