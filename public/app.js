@@ -59,25 +59,9 @@ document.getElementById('modal-overlay').addEventListener('click', e => {
 });
 
 /* ── Auth ──────────────────────────────────────────────────────────────────── */
-document.getElementById('login-form').addEventListener('submit', async e => {
-  e.preventDefault();
-  const username = document.getElementById('l-username').value.trim();
-  const password = document.getElementById('l-password').value;
-  const errEl    = document.getElementById('login-error');
-  errEl.classList.add('hidden');
-  try {
-    currentUser = await api('POST', '/auth/login', { username, password });
-    bootApp();
-  } catch (err) {
-    errEl.textContent = err.message;
-    errEl.classList.remove('hidden');
-  }
-});
-
 document.getElementById('logout-btn').onclick = async () => {
   await api('POST', '/auth/logout');
-  currentUser = null;
-  showScreen('login-screen');
+  window.location.href = '/login';
 };
 
 /* ── Navigation ────────────────────────────────────────────────────────────── */
@@ -138,7 +122,7 @@ async function bootApp() {
     currentUser = await api('GET', '/auth/me');
     bootApp();
   } catch (_) {
-    showScreen('login-screen');
+    window.location.href = '/login';
   }
 })();
 

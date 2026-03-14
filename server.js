@@ -473,7 +473,12 @@ function validateRecordData(data, fields) {
 }
 
 // ─── Serve SPA ────────────────────────────────────────────────────────────────
+app.get('/login', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
 app.get('/{*path}', (req, res) => {
+  if (!req.session.user) return res.redirect('/login');
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
