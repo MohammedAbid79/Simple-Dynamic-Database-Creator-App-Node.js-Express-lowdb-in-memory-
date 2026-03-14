@@ -2,53 +2,80 @@
 
 const express = require('express');
 const session = require('express-session');
-const bcrypt = require('bcryptjs');
+const bcrypt  = require('bcryptjs');
+const crypto  = require('crypto');
 const { v4: uuidv4 } = require('uuid');
-const path = require('path');
+const path    = require('path');
+const os      = require('os');
 
 // ─── In-Memory lowdb setup ────────────────────────────────────────────────────
-const low = require('lowdb');
+const low    = require('lowdb');
 const Memory = require('lowdb/adapters/Memory');
 
 const db = low(new Memory());
 
-// Seed default data
 db.defaults({
   users: [
-    {
-      id: uuidv4(),
-      username: 'admin',
-      password: bcrypt.hashSync('admin123', 10),
-      role: 'admin',
-    },
-    {
-      id: uuidv4(),
-      username: 'guest',
-      password: bcrypt.hashSync('guest123', 10),
-      role: 'guest',
-    },
+    { id: uuidv4(), username: 'admin', password: bcrypt.hashSync('admin123', 10), role: 'admin' },
+    { id: uuidv4(), username: 'guest', password: bcrypt.hashSync('guest123', 10), role: 'guest' },
   ],
-  databases: [],     // { id, name, createdBy, createdAt, fields: [] }
-  records: [],       // { id, databaseId, data: {}, createdBy, createdAt, updatedAt }
+  databases:   [],   // { id, name, createdBy, createdAt, fields: [] }
+  records:     [],   // { id, databaseId, data: {}, createdBy, createdAt, updatedAt }
   activityLog: [],   // { id, action, user, target, detail, timestamp }
+  apiKeys:     [],   // { id, key, name, userId, createdAt, lastUsed }
 }).write();
 
 // ─── Activity log helper ──────────────────────────────────────────────────────
 function logActivity(action, user, target, detail) {
   db.get('activityLog').push({
-    id: uuidv4(),
-    action,
-    user,
-    target: target || '',
-    detail: detail || '',
+    id: uuidv4(), action, user,
+    target: target || '', detail: detail || '',
     timestamp: new Date().toISOString(),
   }).write();
-  // Keep only the last 200 entries
   const all = db.get('activityLog').value();
-  if (all.length > 200) {
-    db.set('activityLog', all.slice(-200)).write();
-  }
+  if (all.length > 200) db.set('activityLog', all.slice(-200)).write();
 }
+
+// ─── Auth user helper ─────────────────────────────────────────────────────────
+// Returns the authenticated user whether they came via session or API key.
+function getAuthUser(req) {
+  return req._apiUser || req.session.user;
+}
+
+// ─── Rate limiter (in-memory sliding window) ──────────────────────────────────
+const _rlMap = new Map();
+// Clean up stale entries every 5 minutes to avoid memory growth
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, e] of _rlMap) {
+    if (now - e.start >= e.windowMs) _rlMap.delete(k);
+  }
+}, 5 * 60 * 1000).unref();
+
+function createRateLimiter(max, windowMs) {
+  return function rateLimitMiddleware(req, res, next) {
+    const key = `${req.ip}|${max}|${windowMs}`;
+    const now = Date.now();
+    let e = _rlMap.get(key);
+    if (!e || now - e.start >= windowMs) {
+      e = { count: 0, start: now, windowMs };
+      _rlMap.set(key, e);
+    }
+    e.count++;
+    const remaining = Math.max(0, max - e.count);
+    res.set('X-RateLimit-Limit',     String(max));
+    res.set('X-RateLimit-Remaining', String(remaining));
+    res.set('X-RateLimit-Reset',     String(Math.ceil((e.start + windowMs) / 1000)));
+    if (e.count > max) {
+      return res.status(429).json({ error: 'Rate limit exceeded. Please slow down.' });
+    }
+    next();
+  };
+}
+
+// 10 req/min for login (brute-force protection), 120 req/min for all other API
+const loginLimiter = createRateLimiter(10,  60 * 1000);
+const apiLimiter   = createRateLimiter(120, 60 * 1000);
 
 // ─── Express app ─────────────────────────────────────────────────────────────
 const app = express();
@@ -56,37 +83,62 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
-app.use(
-  session({
-    secret: 'dyndb-secret-key-change-in-prod',
-    resave: false,
-    saveUninitialized: false,
-    cookie: { maxAge: 3600000 }, // 1 hour
-  })
-);
+
+// Self-hosted Inter font (no internet required)
+app.use('/fonts/inter', express.static(
+  path.join(__dirname, 'node_modules/@fontsource/inter')
+));
+
+app.use(session({
+  secret: 'dyndb-secret-key-change-in-prod',
+  resave: false,
+  saveUninitialized: false,
+  cookie: { maxAge: 3600000 },
+}));
+
+// Apply general rate limit to all /api routes
+app.use('/api', apiLimiter);
 
 // ─── Auth middleware ──────────────────────────────────────────────────────────
 function requireAuth(req, res, next) {
-  if (!req.session.user) return res.status(401).json({ error: 'Not authenticated' });
+  // 1. Session-based auth (web UI)
+  if (req.session.user) return next();
+
+  // 2. API key auth (X-API-Key header or Authorization: Bearer <key>)
+  const rawKey = (req.headers['x-api-key'] || '').trim() ||
+    (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '').trim();
+
+  if (!rawKey) return res.status(401).json({ error: 'Not authenticated' });
+
+  const apiKey = db.get('apiKeys').find({ key: rawKey }).value();
+  if (!apiKey) return res.status(401).json({ error: 'Invalid API key' });
+
+  const user = db.get('users').find({ id: apiKey.userId }).value();
+  if (!user) return res.status(401).json({ error: 'Invalid API key' });
+
+  // Update last-used timestamp
+  db.get('apiKeys').find({ id: apiKey.id })
+    .assign({ lastUsed: new Date().toISOString() }).write();
+
+  req._apiUser = { id: user.id, username: user.username, role: user.role };
   next();
 }
 
 function requireAdmin(req, res, next) {
-  if (!req.session.user || req.session.user.role !== 'admin') {
+  const user = getAuthUser(req);
+  if (!user || user.role !== 'admin') {
     return res.status(403).json({ error: 'Admin access required' });
   }
   next();
 }
 
 // ─── Auth routes ─────────────────────────────────────────────────────────────
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', loginLimiter, (req, res) => {
   const { username, password } = req.body;
   const user = db.get('users').find({ username }).value();
-
   if (!user || !bcrypt.compareSync(password, user.password)) {
     return res.status(401).json({ error: 'Invalid credentials' });
   }
-
   req.session.user = { id: user.id, username: user.username, role: user.role };
   res.json({ username: user.username, role: user.role });
 });
@@ -96,12 +148,13 @@ app.post('/api/auth/logout', (req, res) => {
 });
 
 app.get('/api/auth/me', requireAuth, (req, res) => {
-  res.json(req.session.user);
+  res.json(getAuthUser(req));
 });
 
 // ─── User management (admin only) ────────────────────────────────────────────
 app.get('/api/users', requireAdmin, (req, res) => {
-  const users = db.get('users').map(u => ({ id: u.id, username: u.username, role: u.role })).value();
+  const users = db.get('users')
+    .map(u => ({ id: u.id, username: u.username, role: u.role })).value();
   res.json(users);
 });
 
@@ -113,12 +166,7 @@ app.post('/api/users', requireAdmin, (req, res) => {
   if (db.get('users').find({ username }).value()) {
     return res.status(409).json({ error: 'Username already exists' });
   }
-  const newUser = {
-    id: uuidv4(),
-    username,
-    password: bcrypt.hashSync(password, 10),
-    role,
-  };
+  const newUser = { id: uuidv4(), username, password: bcrypt.hashSync(password, 10), role };
   db.get('users').push(newUser).write();
   res.status(201).json({ id: newUser.id, username, role });
 });
@@ -148,9 +196,62 @@ app.delete('/api/users/:id', requireAdmin, (req, res) => {
   res.json({ message: 'User deleted' });
 });
 
+// ─── API key management ───────────────────────────────────────────────────────
+app.get('/api/keys', requireAuth, (req, res) => {
+  const user = getAuthUser(req);
+  const keys = db.get('apiKeys')
+    .filter({ userId: user.id })
+    .map(k => ({
+      id:         k.id,
+      name:       k.name,
+      keyPreview: k.key.slice(0, 14) + '…',
+      createdAt:  k.createdAt,
+      lastUsed:   k.lastUsed,
+    }))
+    .value();
+  res.json(keys);
+});
+
+app.post('/api/keys', requireAuth, (req, res) => {
+  const user = getAuthUser(req);
+  const { name } = req.body;
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: 'Key name is required' });
+  }
+  const existing = db.get('apiKeys').filter({ userId: user.id }).value();
+  if (existing.length >= 5) {
+    return res.status(400).json({ error: 'Maximum 5 API keys per user' });
+  }
+  const key    = 'dyndb_' + crypto.randomBytes(24).toString('hex');
+  const newKey = {
+    id:        uuidv4(),
+    key,
+    name:      name.trim(),
+    userId:    user.id,
+    createdAt: new Date().toISOString(),
+    lastUsed:  null,
+  };
+  db.get('apiKeys').push(newKey).write();
+  logActivity('create_key', user.username, newKey.name, `Created API key "${newKey.name}"`);
+  // Return full key only on creation — it is never shown again
+  res.status(201).json({ id: newKey.id, name: newKey.name, key, createdAt: newKey.createdAt });
+});
+
+app.delete('/api/keys/:id', requireAuth, (req, res) => {
+  const user   = getAuthUser(req);
+  const apiKey = db.get('apiKeys').find({ id: req.params.id }).value();
+  if (!apiKey) return res.status(404).json({ error: 'API key not found' });
+  if (apiKey.userId !== user.id && user.role !== 'admin') {
+    return res.status(403).json({ error: "Cannot revoke another user's API key" });
+  }
+  db.get('apiKeys').remove({ id: req.params.id }).write();
+  logActivity('delete_key', user.username, apiKey.name, `Revoked API key "${apiKey.name}"`);
+  res.json({ message: 'API key revoked' });
+});
+
 // ─── Database management ─────────────────────────────────────────────────────
 app.get('/api/databases', requireAuth, (req, res) => {
-  const dbs = db.get('databases').value();
+  const dbs    = db.get('databases').value();
   const result = dbs.map(d => ({
     ...d,
     recordCount: db.get('records').filter({ databaseId: d.id }).value().length,
@@ -163,24 +264,24 @@ app.post('/api/databases', requireAdmin, (req, res) => {
   if (!name || !Array.isArray(fields) || fields.length === 0) {
     return res.status(400).json({ error: 'name and at least one field required' });
   }
-  // Validate fields: [{ name, type }]
   for (const f of fields) {
     if (!f.name || !['string', 'number', 'boolean', 'date'].includes(f.type)) {
-      return res.status(400).json({ error: `Invalid field: ${JSON.stringify(f)}. Type must be string|number|boolean|date` });
+      return res.status(400).json({
+        error: `Invalid field: ${JSON.stringify(f)}. Type must be string|number|boolean|date`,
+      });
     }
   }
   if (db.get('databases').find({ name }).value()) {
     return res.status(409).json({ error: 'Database name already exists' });
   }
+  const user  = getAuthUser(req);
   const newDb = {
-    id: uuidv4(),
-    name,
-    fields,
-    createdBy: req.session.user.username,
+    id: uuidv4(), name, fields,
+    createdBy: user.username,
     createdAt: new Date().toISOString(),
   };
   db.get('databases').push(newDb).write();
-  logActivity('create_db', req.session.user.username, name, `Created database "${name}" with ${fields.length} field(s)`);
+  logActivity('create_db', user.username, name, `Created database "${name}" with ${fields.length} field(s)`);
   res.status(201).json(newDb);
 });
 
@@ -204,7 +305,6 @@ app.put('/api/databases/:id', requireAdmin, (req, res) => {
     }
     updates.name = name;
   }
-
   if (fields) {
     if (!Array.isArray(fields) || fields.length === 0) {
       return res.status(400).json({ error: 'fields must be a non-empty array' });
@@ -217,20 +317,21 @@ app.put('/api/databases/:id', requireAdmin, (req, res) => {
     updates.fields = fields;
   }
 
+  const user = getAuthUser(req);
   db.get('databases').find({ id: req.params.id }).assign(updates).write();
-  logActivity('update_db', req.session.user.username, database.name, 'Updated database schema');
+  logActivity('update_db', user.username, database.name, 'Updated database schema');
   res.json(db.get('databases').find({ id: req.params.id }).value());
 });
 
 app.delete('/api/databases/:id', requireAdmin, (req, res) => {
-  if (!db.get('databases').find({ id: req.params.id }).value()) {
-    return res.status(404).json({ error: 'Database not found' });
-  }
   const dbToDelete = db.get('databases').find({ id: req.params.id }).value();
+  if (!dbToDelete) return res.status(404).json({ error: 'Database not found' });
+
   const recCount = db.get('records').filter({ databaseId: req.params.id }).value().length;
+  const user     = getAuthUser(req);
   db.get('databases').remove({ id: req.params.id }).write();
   db.get('records').remove({ databaseId: req.params.id }).write();
-  logActivity('delete_db', req.session.user.username, dbToDelete.name, `Deleted database and ${recCount} record(s)`);
+  logActivity('delete_db', user.username, dbToDelete.name, `Deleted database and ${recCount} record(s)`);
   res.json({ message: 'Database and all its records deleted' });
 });
 
@@ -239,29 +340,27 @@ app.get('/api/databases/:dbId/records', requireAuth, (req, res) => {
   if (!db.get('databases').find({ id: req.params.dbId }).value()) {
     return res.status(404).json({ error: 'Database not found' });
   }
-  const records = db.get('records').filter({ databaseId: req.params.dbId }).value();
-  res.json(records);
+  res.json(db.get('records').filter({ databaseId: req.params.dbId }).value());
 });
 
 app.post('/api/databases/:dbId/records', requireAuth, (req, res) => {
   const database = db.get('databases').find({ id: req.params.dbId }).value();
   if (!database) return res.status(404).json({ error: 'Database not found' });
 
-  // Guests can add records
-  const data = req.body.data || {};
-  const validated = validateRecordData(data, database.fields);
+  const validated = validateRecordData(req.body.data || {}, database.fields);
   if (validated.error) return res.status(400).json({ error: validated.error });
 
+  const user      = getAuthUser(req);
   const newRecord = {
     id: uuidv4(),
     databaseId: req.params.dbId,
-    data: validated.data,
-    createdBy: req.session.user.username,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    data:       validated.data,
+    createdBy:  user.username,
+    createdAt:  new Date().toISOString(),
+    updatedAt:  new Date().toISOString(),
   };
   db.get('records').push(newRecord).write();
-  logActivity('create_record', req.session.user.username, database.name, `Added record to "${database.name}"`);
+  logActivity('create_record', user.username, database.name, `Added record to "${database.name}"`);
   res.status(201).json(newRecord);
 });
 
@@ -269,48 +368,52 @@ app.put('/api/databases/:dbId/records/:id', requireAuth, (req, res) => {
   const database = db.get('databases').find({ id: req.params.dbId }).value();
   if (!database) return res.status(404).json({ error: 'Database not found' });
 
-  const record = db.get('records').find({ id: req.params.id, databaseId: req.params.dbId }).value();
+  const record = db.get('records')
+    .find({ id: req.params.id, databaseId: req.params.dbId }).value();
   if (!record) return res.status(404).json({ error: 'Record not found' });
 
-  // Guests can only edit their own records
-  if (req.session.user.role === 'guest' && record.createdBy !== req.session.user.username) {
+  const user = getAuthUser(req);
+  if (user.role === 'guest' && record.createdBy !== user.username) {
     return res.status(403).json({ error: 'Guests can only edit their own records' });
   }
 
-  const data = req.body.data || {};
-  const validated = validateRecordData(data, database.fields);
+  const validated = validateRecordData(req.body.data || {}, database.fields);
   if (validated.error) return res.status(400).json({ error: validated.error });
 
-  db.get('records').find({ id: req.params.id }).assign({ data: validated.data, updatedAt: new Date().toISOString() }).write();
-  logActivity('update_record', req.session.user.username, database.name, `Updated record in "${database.name}"`);
+  db.get('records').find({ id: req.params.id })
+    .assign({ data: validated.data, updatedAt: new Date().toISOString() }).write();
+  logActivity('update_record', user.username, database.name, `Updated record in "${database.name}"`);
   res.json(db.get('records').find({ id: req.params.id }).value());
 });
 
 app.delete('/api/databases/:dbId/records/:id', requireAuth, (req, res) => {
-  const record = db.get('records').find({ id: req.params.id, databaseId: req.params.dbId }).value();
+  const record = db.get('records')
+    .find({ id: req.params.id, databaseId: req.params.dbId }).value();
   if (!record) return res.status(404).json({ error: 'Record not found' });
 
-  if (req.session.user.role === 'guest' && record.createdBy !== req.session.user.username) {
+  const user = getAuthUser(req);
+  if (user.role === 'guest' && record.createdBy !== user.username) {
     return res.status(403).json({ error: 'Guests can only delete their own records' });
   }
 
   const recDb = db.get('databases').find({ id: req.params.dbId }).value();
   db.get('records').remove({ id: req.params.id }).write();
-  logActivity('delete_record', req.session.user.username, recDb ? recDb.name : req.params.dbId, `Deleted record from "${recDb ? recDb.name : req.params.dbId}"`);
+  logActivity('delete_record', user.username,
+    recDb ? recDb.name : req.params.dbId,
+    `Deleted record from "${recDb ? recDb.name : req.params.dbId}"`);
   res.json({ message: 'Record deleted' });
 });
 
 // ─── Activity log (admin only) ────────────────────────────────────────────────
 app.get('/api/activity', requireAdmin, (req, res) => {
-  const log = db.get('activityLog').value().slice().reverse().slice(0, 100);
-  res.json(log);
+  res.json(db.get('activityLog').value().slice().reverse().slice(0, 100));
 });
 
 // ─── Helper: validate record data against schema ──────────────────────────────
 function validateRecordData(data, fields) {
   const result = {};
   for (const field of fields) {
-    const val = data[field.name];
+    const val     = data[field.name];
     const isEmpty = val === undefined || val === null || val === '';
 
     if (isEmpty) {
@@ -322,8 +425,10 @@ function validateRecordData(data, fields) {
     if (field.type === 'number') {
       if (isNaN(Number(val))) return { error: `"${field.name}" must be a number` };
       const n = Number(val);
-      if (field.min != null && n < Number(field.min)) return { error: `"${field.name}" must be ≥ ${field.min}` };
-      if (field.max != null && n > Number(field.max)) return { error: `"${field.name}" must be ≤ ${field.max}` };
+      if (field.min != null && n < Number(field.min))
+        return { error: `"${field.name}" must be ≥ ${field.min}` };
+      if (field.max != null && n > Number(field.max))
+        return { error: `"${field.name}" must be ≤ ${field.max}` };
     }
 
     if (field.type === 'boolean' && !['true', 'false', true, false].includes(val)) {
@@ -353,7 +458,6 @@ function validateRecordData(data, fields) {
         return { error: `"${field.name}" must be on or before ${field.maxDate}` };
     }
 
-    // Enum check — applies to all types
     if (field.enumValues && Array.isArray(field.enumValues) && field.enumValues.length > 0) {
       const sv = String(val === true ? 'true' : val === false ? 'false' : val);
       if (!field.enumValues.includes(sv))
@@ -375,12 +479,11 @@ app.get('/{*path}', (req, res) => {
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 8080;
-const HOST = '0.0.0.0';   // bind all interfaces (ethernet + localhost)
+const HOST = '0.0.0.0';
 
-const os = require('os');
 function getLocalIPs() {
   const ifaces = os.networkInterfaces();
-  const ips = [];
+  const ips    = [];
   for (const name of Object.keys(ifaces)) {
     for (const iface of ifaces[name]) {
       if (iface.family === 'IPv4' && !iface.internal) ips.push(iface.address);

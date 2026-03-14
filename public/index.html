@@ -4,9 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dynamic DB Creator</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/fonts/inter/400.css" />
+  <link rel="stylesheet" href="/fonts/inter/500.css" />
+  <link rel="stylesheet" href="/fonts/inter/600.css" />
+  <link rel="stylesheet" href="/fonts/inter/700.css" />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
@@ -45,6 +46,7 @@
         <button class="nav-btn active" data-view="databases">&#128197; Databases</button>
         <button class="nav-btn" id="nav-users" data-view="users" style="display:none">&#128100; Users</button>
         <button class="nav-btn" id="nav-activity" data-view="activity" style="display:none">&#128336; Activity Log</button>
+        <button class="nav-btn" id="nav-apikeys" data-view="apikeys" style="display:none">&#128273; API Keys</button>
       </nav>
       <div class="sidebar-footer">
         <div id="user-badge"></div>
@@ -82,6 +84,16 @@
           <button id="btn-add-record" class="btn btn-primary">+ Add Record</button>
         </div>
         <div id="record-list" class="table-wrap"></div>
+      </div>
+
+      <!-- API Keys View (all users) -->
+      <div id="view-apikeys" class="view">
+        <div class="view-header">
+          <h2>&#128273; API Keys</h2>
+          <button id="btn-create-key" class="btn btn-primary">+ Generate Key</button>
+        </div>
+        <p class="apikey-hint">Use your API key with <code>X-API-Key: &lt;key&gt;</code> or <code>Authorization: Bearer &lt;key&gt;</code>. Keys are shown only once on creation.</p>
+        <div id="apikey-list" class="table-wrap"></div>
       </div>
 
       <!-- Activity Log View (admin only) -->

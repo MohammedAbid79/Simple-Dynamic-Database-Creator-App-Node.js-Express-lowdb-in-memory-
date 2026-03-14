@@ -573,3 +573,52 @@ select option { background: var(--surface2); }
   font-size: .75rem;
   color: var(--text-muted);
 }
+
+/* ── API Keys view ────────────────────────────────────────────────────────── */
+.apikey-hint {
+  font-size: .82rem;
+  color: var(--text-muted);
+  margin-bottom: 18px;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  border-left: 3px solid var(--accent);
+}
+
+.apikey-hint code {
+  background: var(--surface2);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: .8rem;
+  color: var(--accent);
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.key-preview {
+  background: var(--surface2);
+  border-radius: 5px;
+  padding: 2px 8px;
+  font-size: .8rem;
+  color: var(--text-muted);
+  font-family: 'Courier New', Courier, monospace;
+  letter-spacing: .03em;
+}
+
+.key-reveal-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface2);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+
+.key-reveal-box code {
+  flex: 1;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: .82rem;
+  color: var(--accent);
+  word-break: break-all;
+}

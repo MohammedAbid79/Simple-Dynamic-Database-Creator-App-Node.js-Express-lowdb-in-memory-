@@ -89,6 +89,7 @@ document.querySelectorAll('.nav-btn[data-view]').forEach(btn => {
     if (btn.dataset.view === 'databases') loadDatabases();
     if (btn.dataset.view === 'users')     loadUsers();
     if (btn.dataset.view === 'activity')  loadActivity();
+    if (btn.dataset.view === 'apikeys')   loadApiKeys();
   });
 });
 
@@ -113,14 +114,16 @@ async function bootApp() {
 
   // Admin-only UI
   if (currentUser.role === 'admin') {
-    document.getElementById('nav-users').style.display = '';
+    document.getElementById('nav-users').style.display    = '';
     document.getElementById('nav-activity').style.display = '';
     document.getElementById('btn-create-db').style.display = '';
   } else {
-    document.getElementById('nav-users').style.display = 'none';
+    document.getElementById('nav-users').style.display    = 'none';
     document.getElementById('nav-activity').style.display = 'none';
     document.getElementById('btn-create-db').style.display = 'none';
   }
+  // API Keys visible to all logged-in users
+  document.getElementById('nav-apikeys').style.display = '';
 
   showView('view-databases');
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -643,11 +646,13 @@ function deleteUser(id, username) {
    ════════════════════════════════════════════════════════════════════════════ */
 const ACTION_META = {
   create_db:     { icon: '📁', label: 'Created database',  color: 'var(--success)' },
-  update_db:     { icon: '✏️',  label: 'Updated database',  color: 'var(--accent)' },
-  delete_db:     { icon: '🗑️',  label: 'Deleted database',  color: 'var(--danger)' },
+  update_db:     { icon: '✏️',  label: 'Updated database',  color: 'var(--accent)'  },
+  delete_db:     { icon: '🗑️',  label: 'Deleted database',  color: 'var(--danger)'  },
   create_record: { icon: '➕',  label: 'Added record',      color: 'var(--success)' },
-  update_record: { icon: '🔄',  label: 'Updated record',    color: 'var(--accent)' },
-  delete_record: { icon: '❌',  label: 'Deleted record',    color: 'var(--danger)' },
+  update_record: { icon: '🔄',  label: 'Updated record',    color: 'var(--accent)'  },
+  delete_record: { icon: '❌',  label: 'Deleted record',    color: 'var(--danger)'  },
+  create_key:    { icon: '🔑',  label: 'Created API key',   color: 'var(--success)' },
+  delete_key:    { icon: '🚫',  label: 'Revoked API key',   color: 'var(--danger)'  },
 };
 
 async function loadActivity() {
@@ -682,6 +687,82 @@ async function loadActivity() {
 }
 
 document.getElementById('btn-refresh-activity').onclick = loadActivity;
+
+/* ════════════════════════════════════════════════════════════════════════════
+   API KEYS VIEW (all users)
+   ════════════════════════════════════════════════════════════════════════════ */
+async function loadApiKeys() {
+  const wrap = document.getElementById('apikey-list');
+  wrap.innerHTML = `<p class="empty-state">Loading…</p>`;
+  try {
+    const keys = await api('GET', '/keys');
+    if (keys.length === 0) {
+      wrap.innerHTML = `<p class="empty-state">No API keys yet. Click <b>+ Generate Key</b> to create one.</p>`;
+      return;
+    }
+    wrap.innerHTML = `<table>
+      <thead><tr><th>Name</th><th>Key Preview</th><th>Created</th><th>Last Used</th><th>Actions</th></tr></thead>
+      <tbody>${keys.map(k => `<tr>
+        <td><strong>${esc(k.name)}</strong></td>
+        <td><code class="key-preview">${esc(k.keyPreview)}</code></td>
+        <td>${fmtDate(k.createdAt)}</td>
+        <td>${k.lastUsed ? fmtDate(k.lastUsed) : '<span style="color:var(--text-muted)">Never</span>'}</td>
+        <td>
+          <div class="actions-cell">
+            <button class="btn-icon del" onclick="revokeApiKey('${k.id}','${esc(k.name)}')">&#128465; Revoke</button>
+          </div>
+        </td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+  } catch (err) {
+    wrap.innerHTML = `<p class="empty-state" style="color:var(--danger)">${esc(err.message)}</p>`;
+  }
+}
+
+document.getElementById('btn-create-key').onclick = () => {
+  openModal('Generate API Key', `
+    <label>Key Name <span style="color:var(--text-muted);font-weight:400">(e.g. "My Script", "CI Pipeline")</span></label>
+    <input id="key-name-input" type="text" placeholder="e.g. Production Script" maxlength="60" />`,
+    async () => {
+      const name = document.getElementById('key-name-input').value.trim();
+      if (!name) return toast('Key name is required', 'error');
+      try {
+        const result = await api('POST', '/keys', { name });
+        closeModal();
+        // Show the key exactly once — user must copy it now
+        openModal('Your New API Key', `
+          <p style="color:var(--text-muted);font-size:.85rem;margin-bottom:12px">
+            Copy this key now. It will <strong style="color:var(--danger)">not be shown again</strong>.
+          </p>
+          <div class="key-reveal-box">
+            <code id="new-key-value">${esc(result.key)}</code>
+            <button class="btn btn-sm btn-outline" onclick="copyApiKey()">&#128203; Copy</button>
+          </div>
+          <p style="color:var(--text-muted);font-size:.78rem;margin-top:10px">
+            Use as: <code>X-API-Key: ${esc(result.key)}</code>
+          </p>`, null);
+        loadApiKeys();
+        toast('API key created!', 'success');
+      } catch (err) { toast(err.message, 'error'); }
+    }, 'Generate');
+};
+
+function copyApiKey() {
+  const val = document.getElementById('new-key-value').textContent;
+  navigator.clipboard.writeText(val).then(() => toast('Key copied to clipboard!', 'success'));
+}
+
+function revokeApiKey(id, name) {
+  openModal('Revoke API Key', `<p>Revoke key <b>${esc(name)}</b>? Any scripts using it will stop working.</p>`,
+    async () => {
+      try {
+        await api('DELETE', `/keys/${id}`);
+        closeModal();
+        toast('API key revoked', 'success');
+        loadApiKeys();
+      } catch (err) { toast(err.message, 'error'); }
+    }, 'Revoke');
+}
 
 /* ── Utilities ─────────────────────────────────────────────────────────────── */
 function esc(str) {

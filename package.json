@@ -15,6 +15,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@fontsource/inter": "^5.2.8",
     "bcryptjs": "^3.0.3",
     "express": "^5.2.1",
     "express-session": "^1.19.0",
