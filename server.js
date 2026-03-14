@@ -1,12 +1,14 @@
 'use strict';
 
-const express = require('express');
-const session = require('express-session');
-const bcrypt  = require('bcryptjs');
-const crypto  = require('crypto');
+const express    = require('express');
+const session    = require('express-session');
+const bcrypt     = require('bcryptjs');
+const crypto     = require('crypto');
 const { v4: uuidv4 } = require('uuid');
-const path    = require('path');
-const os      = require('os');
+const path       = require('path');
+const os         = require('os');
+const swaggerUi  = require('swagger-ui-express');
+const swaggerSpec = require('./swagger');
 
 // ─── In-Memory lowdb setup ────────────────────────────────────────────────────
 const low    = require('lowdb');
@@ -88,6 +90,17 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/fonts/inter', express.static(
   path.join(__dirname, 'node_modules/@fontsource/inter')
 ));
+
+// ─── Swagger / API docs ───────────────────────────────────────────────────────
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  customSiteTitle: 'FluxDB API Docs',
+  customCss: `
+    .swagger-ui .topbar { display: none }
+    .swagger-ui { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif }
+    body { background: #0c0e1a }
+    .swagger-ui .info .title { color: #dde2f2 }
+  `,
+}));
 
 app.use(session({
   secret: 'dyndb-secret-key-change-in-prod',
