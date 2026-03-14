@@ -41,6 +41,7 @@
       <nav>
         <button class="nav-btn active" data-view="databases">&#128197; Databases</button>
         <button class="nav-btn" id="nav-users" data-view="users" style="display:none">&#128100; Users</button>
+        <button class="nav-btn" id="nav-activity" data-view="activity" style="display:none">&#128336; Activity Log</button>
       </nav>
       <div class="sidebar-footer">
         <div id="user-badge"></div>
@@ -73,9 +74,20 @@
         <div class="view-header">
           <button id="btn-back-db" class="btn btn-ghost">&#8592; Back</button>
           <h2 id="records-db-name">Records</h2>
+          <input id="record-search" type="text" placeholder="&#128269; Search records…" class="search-input" />
+          <button id="btn-export-csv" class="btn btn-outline">&#8595; Export CSV</button>
           <button id="btn-add-record" class="btn btn-primary">+ Add Record</button>
         </div>
         <div id="record-list" class="table-wrap"></div>
+      </div>
+
+      <!-- Activity Log View (admin only) -->
+      <div id="view-activity" class="view">
+        <div class="view-header">
+          <h2>&#128336; Activity Log</h2>
+          <button id="btn-refresh-activity" class="btn btn-outline btn-sm">&#8635; Refresh</button>
+        </div>
+        <div id="activity-list"></div>
       </div>
     </main>
   </div>

@@ -30,7 +30,25 @@ db.defaults({
   ],
   databases: [],     // { id, name, createdBy, createdAt, fields: [] }
   records: [],       // { id, databaseId, data: {}, createdBy, createdAt, updatedAt }
+  activityLog: [],   // { id, action, user, target, detail, timestamp }
 }).write();
+
+// ─── Activity log helper ──────────────────────────────────────────────────────
+function logActivity(action, user, target, detail) {
+  db.get('activityLog').push({
+    id: uuidv4(),
+    action,
+    user,
+    target: target || '',
+    detail: detail || '',
+    timestamp: new Date().toISOString(),
+  }).write();
+  // Keep only the last 200 entries
+  const all = db.get('activityLog').value();
+  if (all.length > 200) {
+    db.set('activityLog', all.slice(-200)).write();
+  }
+}
 
 // ─── Express app ─────────────────────────────────────────────────────────────
 const app = express();
@@ -132,7 +150,12 @@ app.delete('/api/users/:id', requireAdmin, (req, res) => {
 
 // ─── Database management ─────────────────────────────────────────────────────
 app.get('/api/databases', requireAuth, (req, res) => {
-  res.json(db.get('databases').value());
+  const dbs = db.get('databases').value();
+  const result = dbs.map(d => ({
+    ...d,
+    recordCount: db.get('records').filter({ databaseId: d.id }).value().length,
+  }));
+  res.json(result);
 });
 
 app.post('/api/databases', requireAdmin, (req, res) => {
@@ -157,6 +180,7 @@ app.post('/api/databases', requireAdmin, (req, res) => {
     createdAt: new Date().toISOString(),
   };
   db.get('databases').push(newDb).write();
+  logActivity('create_db', req.session.user.username, name, `Created database "${name}" with ${fields.length} field(s)`);
   res.status(201).json(newDb);
 });
 
@@ -194,6 +218,7 @@ app.put('/api/databases/:id', requireAdmin, (req, res) => {
   }
 
   db.get('databases').find({ id: req.params.id }).assign(updates).write();
+  logActivity('update_db', req.session.user.username, database.name, 'Updated database schema');
   res.json(db.get('databases').find({ id: req.params.id }).value());
 });
 
@@ -201,8 +226,11 @@ app.delete('/api/databases/:id', requireAdmin, (req, res) => {
   if (!db.get('databases').find({ id: req.params.id }).value()) {
     return res.status(404).json({ error: 'Database not found' });
   }
+  const dbToDelete = db.get('databases').find({ id: req.params.id }).value();
+  const recCount = db.get('records').filter({ databaseId: req.params.id }).value().length;
   db.get('databases').remove({ id: req.params.id }).write();
   db.get('records').remove({ databaseId: req.params.id }).write();
+  logActivity('delete_db', req.session.user.username, dbToDelete.name, `Deleted database and ${recCount} record(s)`);
   res.json({ message: 'Database and all its records deleted' });
 });
 
@@ -233,6 +261,7 @@ app.post('/api/databases/:dbId/records', requireAuth, (req, res) => {
     updatedAt: new Date().toISOString(),
   };
   db.get('records').push(newRecord).write();
+  logActivity('create_record', req.session.user.username, database.name, `Added record to "${database.name}"`);
   res.status(201).json(newRecord);
 });
 
@@ -253,6 +282,7 @@ app.put('/api/databases/:dbId/records/:id', requireAuth, (req, res) => {
   if (validated.error) return res.status(400).json({ error: validated.error });
 
   db.get('records').find({ id: req.params.id }).assign({ data: validated.data, updatedAt: new Date().toISOString() }).write();
+  logActivity('update_record', req.session.user.username, database.name, `Updated record in "${database.name}"`);
   res.json(db.get('records').find({ id: req.params.id }).value());
 });
 
@@ -264,8 +294,16 @@ app.delete('/api/databases/:dbId/records/:id', requireAuth, (req, res) => {
     return res.status(403).json({ error: 'Guests can only delete their own records' });
   }
 
+  const recDb = db.get('databases').find({ id: req.params.dbId }).value();
   db.get('records').remove({ id: req.params.id }).write();
+  logActivity('delete_record', req.session.user.username, recDb ? recDb.name : req.params.dbId, `Deleted record from "${recDb ? recDb.name : req.params.dbId}"`);
   res.json({ message: 'Record deleted' });
+});
+
+// ─── Activity log (admin only) ────────────────────────────────────────────────
+app.get('/api/activity', requireAdmin, (req, res) => {
+  const log = db.get('activityLog').value().slice().reverse().slice(0, 100);
+  res.json(log);
 });
 
 // ─── Helper: validate record data against schema ──────────────────────────────

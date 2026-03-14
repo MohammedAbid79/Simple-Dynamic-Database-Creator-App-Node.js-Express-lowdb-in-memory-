@@ -1,6 +1,7 @@
 /* ── State ─────────────────────────────────────────────────────────────────── */
-let currentUser = null;
-let currentDb   = null;   // active database object when in records view
+let currentUser  = null;
+let currentDb    = null;   // active database object when in records view
+let allRecords   = [];     // full unfiltered record list for current db
 
 /* ── API helper ────────────────────────────────────────────────────────────── */
 async function api(method, path, body) {
@@ -87,6 +88,7 @@ document.querySelectorAll('.nav-btn[data-view]').forEach(btn => {
     showView('view-' + btn.dataset.view);
     if (btn.dataset.view === 'databases') loadDatabases();
     if (btn.dataset.view === 'users')     loadUsers();
+    if (btn.dataset.view === 'activity')  loadActivity();
   });
 });
 
@@ -112,9 +114,11 @@ async function bootApp() {
   // Admin-only UI
   if (currentUser.role === 'admin') {
     document.getElementById('nav-users').style.display = '';
+    document.getElementById('nav-activity').style.display = '';
     document.getElementById('btn-create-db').style.display = '';
   } else {
     document.getElementById('nav-users').style.display = 'none';
+    document.getElementById('nav-activity').style.display = 'none';
     document.getElementById('btn-create-db').style.display = 'none';
   }
 
@@ -155,6 +159,7 @@ async function loadDatabases() {
     <div class="db-card" data-id="${d.id}">
       <div class="db-card-name">${esc(d.name)}</div>
       <div class="db-card-meta">Created by ${esc(d.createdBy)} &bull; ${fmtDate(d.createdAt)}</div>
+      <div class="db-card-count"><span class="record-count-badge">${d.recordCount ?? 0} record${(d.recordCount ?? 0) !== 1 ? 's' : ''}</span></div>
       <div class="db-card-fields">
         ${d.fields.map(f => `<span class="field-chip">${esc(f.name)}<span class="badge badge-${f.type}" style="margin-left:4px">${f.type}</span></span>`).join('')}
       </div>
@@ -265,16 +270,65 @@ async function openRecords(dbId) {
 }
 
 document.getElementById('btn-back-db').onclick = () => {
+  document.getElementById('record-search').value = '';
   showView('view-databases');
   document.querySelector('.nav-btn[data-view="databases"]').classList.add('active');
 };
 
+// ── Search / filter records ──────────────────────────────────────────────────
+document.getElementById('record-search').addEventListener('input', e => {
+  const term = e.target.value.trim().toLowerCase();
+  if (!term) { renderRecords(allRecords); return; }
+  const filtered = allRecords.filter(r =>
+    currentDb.fields.some(f => {
+      const v = r.data[f.name];
+      return v !== null && v !== undefined && String(v).toLowerCase().includes(term);
+    }) || r.createdBy.toLowerCase().includes(term)
+  );
+  renderRecords(filtered);
+});
+
+// ── CSV export ───────────────────────────────────────────────────────────────
+document.getElementById('btn-export-csv').onclick = () => {
+  if (!currentDb || allRecords.length === 0) { toast('No records to export', 'error'); return; }
+  const headers = currentDb.fields.map(f => f.name);
+  const csvRows = [
+    [...headers, 'createdBy', 'createdAt'].join(','),
+    ...allRecords.map(r => [
+      ...headers.map(h => {
+        const v = r.data[h];
+        if (v === null || v === undefined) return '';
+        const s = String(v);
+        return s.includes(',') || s.includes('"') || s.includes('\n')
+          ? `"${s.replace(/"/g, '""')}"` : s;
+      }),
+      r.createdBy,
+      r.createdAt,
+    ].join(',')),
+  ];
+  const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `${currentDb.name}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast(`Exported ${allRecords.length} record(s) as CSV`, 'success');
+};
+
 async function loadRecords() {
-  const records = await api('GET', `/databases/${currentDb.id}/records`);
-  const wrap    = document.getElementById('record-list');
+  allRecords = await api('GET', `/databases/${currentDb.id}/records`);
+  renderRecords(allRecords);
+}
+
+function renderRecords(records) {
+  const wrap = document.getElementById('record-list');
 
   if (records.length === 0) {
-    wrap.innerHTML = `<p class="empty-state">No records yet. Click <b>+ Add Record</b> to insert one.</p>`;
+    const term = document.getElementById('record-search').value.trim();
+    wrap.innerHTML = `<p class="empty-state">${term
+      ? `No records match "<b>${esc(term)}</b>".`
+      : 'No records yet. Click <b>+ Add Record</b> to insert one.'}</p>`;
     return;
   }
 
@@ -460,6 +514,51 @@ function deleteUser(id, username) {
       } catch (err) { toast(err.message, 'error'); }
     }, 'Delete');
 }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   ACTIVITY LOG VIEW (admin only)
+   ════════════════════════════════════════════════════════════════════════════ */
+const ACTION_META = {
+  create_db:     { icon: '📁', label: 'Created database',  color: 'var(--success)' },
+  update_db:     { icon: '✏️',  label: 'Updated database',  color: 'var(--accent)' },
+  delete_db:     { icon: '🗑️',  label: 'Deleted database',  color: 'var(--danger)' },
+  create_record: { icon: '➕',  label: 'Added record',      color: 'var(--success)' },
+  update_record: { icon: '🔄',  label: 'Updated record',    color: 'var(--accent)' },
+  delete_record: { icon: '❌',  label: 'Deleted record',    color: 'var(--danger)' },
+};
+
+async function loadActivity() {
+  const list = document.getElementById('activity-list');
+  list.innerHTML = `<p class="empty-state">Loading…</p>`;
+  try {
+    const log = await api('GET', '/activity');
+    if (log.length === 0) {
+      list.innerHTML = `<p class="empty-state">No activity recorded yet.</p>`;
+      return;
+    }
+    list.innerHTML = `<div class="activity-timeline">${log.map(entry => {
+      const meta = ACTION_META[entry.action] || { icon: '•', label: entry.action, color: 'var(--text-muted)' };
+      return `<div class="activity-entry">
+        <div class="activity-icon" style="color:${meta.color}">${meta.icon}</div>
+        <div class="activity-body">
+          <div class="activity-main">
+            <span class="activity-label" style="color:${meta.color}">${meta.label}</span>
+            <span class="activity-target">${esc(entry.target)}</span>
+          </div>
+          <div class="activity-detail">${esc(entry.detail)}</div>
+          <div class="activity-meta">
+            <span class="role-tag role-${entry.user === 'admin' ? 'admin' : 'guest'}">${esc(entry.user)}</span>
+            <span>${fmtDate(entry.timestamp)}</span>
+          </div>
+        </div>
+      </div>`;
+    }).join('')}</div>`;
+  } catch (err) {
+    list.innerHTML = `<p class="empty-state" style="color:var(--danger)">${esc(err.message)}</p>`;
+  }
+}
+
+document.getElementById('btn-refresh-activity').onclick = loadActivity;
 
 /* ── Utilities ─────────────────────────────────────────────────────────────── */
 function esc(str) {
