@@ -132,6 +132,15 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+// admin or member — guests are blocked
+function requireMember(req, res, next) {
+  const user = getAuthUser(req);
+  if (!user || user.role === 'guest') {
+    return res.status(403).json({ error: 'Account required' });
+  }
+  next();
+}
+
 // ─── Auth routes ─────────────────────────────────────────────────────────────
 app.post('/api/auth/login', loginLimiter, (req, res) => {
   const { username, password } = req.body;
@@ -151,6 +160,29 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
   res.json(getAuthUser(req));
 });
 
+app.post('/api/auth/register', loginLimiter, (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Username and password are required' });
+  }
+  if (username.length < 3 || username.length > 32) {
+    return res.status(400).json({ error: 'Username must be 3–32 characters' });
+  }
+  if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
+    return res.status(400).json({ error: 'Username may only contain letters, numbers, _ and -' });
+  }
+  if (password.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  }
+  if (db.get('users').find({ username }).value()) {
+    return res.status(409).json({ error: 'Username already taken' });
+  }
+  const newUser = { id: uuidv4(), username, password: bcrypt.hashSync(password, 10), role: 'member' };
+  db.get('users').push(newUser).write();
+  req.session.user = { id: newUser.id, username, role: 'member' };
+  res.status(201).json({ username, role: 'member' });
+});
+
 // ─── User management (admin only) ────────────────────────────────────────────
 app.get('/api/users', requireAdmin, (req, res) => {
   const users = db.get('users')
@@ -160,8 +192,8 @@ app.get('/api/users', requireAdmin, (req, res) => {
 
 app.post('/api/users', requireAdmin, (req, res) => {
   const { username, password, role } = req.body;
-  if (!username || !password || !['admin', 'guest'].includes(role)) {
-    return res.status(400).json({ error: 'username, password, and role (admin|guest) required' });
+  if (!username || !password || !['admin', 'member', 'guest'].includes(role)) {
+    return res.status(400).json({ error: 'username, password, and role (admin|member|guest) required' });
   }
   if (db.get('users').find({ username }).value()) {
     return res.status(409).json({ error: 'Username already exists' });
@@ -180,7 +212,7 @@ app.put('/api/users/:id', requireAdmin, (req, res) => {
   }
   const updates = {};
   if (password) updates.password = bcrypt.hashSync(password, 10);
-  if (role && ['admin', 'guest'].includes(role)) updates.role = role;
+  if (role && ['admin', 'member', 'guest'].includes(role)) updates.role = role;
   db.get('users').find({ id: req.params.id }).assign(updates).write();
   const updated = db.get('users').find({ id: req.params.id }).value();
   res.json({ id: updated.id, username: updated.username, role: updated.role });
@@ -197,7 +229,7 @@ app.delete('/api/users/:id', requireAdmin, (req, res) => {
 });
 
 // ─── API key management ───────────────────────────────────────────────────────
-app.get('/api/keys', requireAuth, (req, res) => {
+app.get('/api/keys', requireMember, (req, res) => {
   const user = getAuthUser(req);
   const keys = db.get('apiKeys')
     .filter({ userId: user.id })
@@ -212,7 +244,7 @@ app.get('/api/keys', requireAuth, (req, res) => {
   res.json(keys);
 });
 
-app.post('/api/keys', requireAuth, (req, res) => {
+app.post('/api/keys', requireMember, (req, res) => {
   const user = getAuthUser(req);
   const { name } = req.body;
   if (!name || !name.trim()) {
@@ -237,7 +269,7 @@ app.post('/api/keys', requireAuth, (req, res) => {
   res.status(201).json({ id: newKey.id, name: newKey.name, key, createdAt: newKey.createdAt });
 });
 
-app.delete('/api/keys/:id', requireAuth, (req, res) => {
+app.delete('/api/keys/:id', requireMember, (req, res) => {
   const user   = getAuthUser(req);
   const apiKey = db.get('apiKeys').find({ id: req.params.id }).value();
   if (!apiKey) return res.status(404).json({ error: 'API key not found' });
@@ -259,7 +291,7 @@ app.get('/api/databases', requireAuth, (req, res) => {
   res.json(result);
 });
 
-app.post('/api/databases', requireAdmin, (req, res) => {
+app.post('/api/databases', requireMember, (req, res) => {
   const { name, fields } = req.body;
   if (!name || !Array.isArray(fields) || fields.length === 0) {
     return res.status(400).json({ error: 'name and at least one field required' });
@@ -343,7 +375,7 @@ app.get('/api/databases/:dbId/records', requireAuth, (req, res) => {
   res.json(db.get('records').filter({ databaseId: req.params.dbId }).value());
 });
 
-app.post('/api/databases/:dbId/records', requireAuth, (req, res) => {
+app.post('/api/databases/:dbId/records', requireMember, (req, res) => {
   const database = db.get('databases').find({ id: req.params.dbId }).value();
   if (!database) return res.status(404).json({ error: 'Database not found' });
 
@@ -364,7 +396,7 @@ app.post('/api/databases/:dbId/records', requireAuth, (req, res) => {
   res.status(201).json(newRecord);
 });
 
-app.put('/api/databases/:dbId/records/:id', requireAuth, (req, res) => {
+app.put('/api/databases/:dbId/records/:id', requireMember, (req, res) => {
   const database = db.get('databases').find({ id: req.params.dbId }).value();
   if (!database) return res.status(404).json({ error: 'Database not found' });
 
@@ -373,8 +405,8 @@ app.put('/api/databases/:dbId/records/:id', requireAuth, (req, res) => {
   if (!record) return res.status(404).json({ error: 'Record not found' });
 
   const user = getAuthUser(req);
-  if (user.role === 'guest' && record.createdBy !== user.username) {
-    return res.status(403).json({ error: 'Guests can only edit their own records' });
+  if (user.role === 'member' && record.createdBy !== user.username) {
+    return res.status(403).json({ error: 'You can only edit your own records' });
   }
 
   const validated = validateRecordData(req.body.data || {}, database.fields);
@@ -386,14 +418,14 @@ app.put('/api/databases/:dbId/records/:id', requireAuth, (req, res) => {
   res.json(db.get('records').find({ id: req.params.id }).value());
 });
 
-app.delete('/api/databases/:dbId/records/:id', requireAuth, (req, res) => {
+app.delete('/api/databases/:dbId/records/:id', requireMember, (req, res) => {
   const record = db.get('records')
     .find({ id: req.params.id, databaseId: req.params.dbId }).value();
   if (!record) return res.status(404).json({ error: 'Record not found' });
 
   const user = getAuthUser(req);
-  if (user.role === 'guest' && record.createdBy !== user.username) {
-    return res.status(403).json({ error: 'Guests can only delete their own records' });
+  if (user.role === 'member' && record.createdBy !== user.username) {
+    return res.status(403).json({ error: 'You can only delete your own records' });
   }
 
   const recDb = db.get('databases').find({ id: req.params.dbId }).value();

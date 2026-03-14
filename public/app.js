@@ -96,18 +96,17 @@ async function bootApp() {
   badge.innerHTML = `<strong>${currentUser.username}</strong>
     <span class="role-tag role-${currentUser.role}">${currentUser.role.toUpperCase()}</span>`;
 
-  // Admin-only UI
-  if (currentUser.role === 'admin') {
-    document.getElementById('nav-users').style.display    = '';
-    document.getElementById('nav-activity').style.display = '';
-    document.getElementById('btn-create-db').style.display = '';
-  } else {
-    document.getElementById('nav-users').style.display    = 'none';
-    document.getElementById('nav-activity').style.display = 'none';
-    document.getElementById('btn-create-db').style.display = 'none';
-  }
-  // API Keys visible to all logged-in users
-  document.getElementById('nav-apikeys').style.display = '';
+  const role    = currentUser.role;
+  const isAdmin  = role === 'admin';
+  const isMember = role === 'member';
+
+  // Admin-only
+  document.getElementById('nav-users').style.display    = isAdmin ? '' : 'none';
+  document.getElementById('nav-activity').style.display = isAdmin ? '' : 'none';
+
+  // Admin + member (not guest)
+  document.getElementById('btn-create-db').style.display  = (isAdmin || isMember) ? '' : 'none';
+  document.getElementById('nav-apikeys').style.display     = (isAdmin || isMember) ? '' : 'none';
 
   showView('view-databases');
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -134,10 +133,11 @@ async function loadDatabases() {
   const list = document.getElementById('db-list');
 
   if (dbs.length === 0) {
+    const canCreate = currentUser.role === 'admin' || currentUser.role === 'member';
     list.innerHTML = `<div class="empty-state">
-      ${currentUser.role === 'admin'
+      ${canCreate
         ? 'No databases yet. Click <b>+ New Database</b> to create one.'
-        : 'No databases available. Ask an admin to create one.'}
+        : 'No databases available yet.'}
     </div>`;
     return;
   }
@@ -345,6 +345,8 @@ function deleteDatabase(id, name) {
 async function openRecords(dbId) {
   currentDb = await api('GET', `/databases/${dbId}`);
   document.getElementById('records-db-name').textContent = currentDb.name;
+  const isGuest = currentUser.role === 'guest';
+  document.getElementById('btn-add-record').style.display = isGuest ? 'none' : '';
   showView('view-records');
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   await loadRecords();
@@ -417,7 +419,8 @@ function renderRecords(records) {
     `<th>${esc(f.name)} <span class="badge badge-${f.type}">${f.type}</span></th>`).join('');
 
   const rows = records.map(r => {
-    const canEdit = currentUser.role === 'admin' || r.createdBy === currentUser.username;
+    const canEdit = currentUser.role !== 'guest' &&
+      (currentUser.role === 'admin' || r.createdBy === currentUser.username);
     const cells   = currentDb.fields.map(f => {
       const v = r.data[f.name];
       return `<td>${v === null || v === undefined ? '<span style="color:var(--text-muted)">—</span>' : esc(String(v))}</td>`;

@@ -12,156 +12,193 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-      font-size: 15px;
-      color: #e2e8f0;
-      background: #0f1117;
-      background-image:
-        radial-gradient(ellipse 70% 50% at 70% 10%, rgba(99,102,241,.18) 0%, transparent 60%),
-        radial-gradient(ellipse 45% 40% at 10% 90%, rgba(16,185,129,.1) 0%, transparent 55%);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      font-size: 14px;
+      background: #0a0a0a;
+      overflow: hidden;
     }
+
+    /* Ambient blobs */
+    .blob {
+      position: fixed;
+      border-radius: 50%;
+      filter: blur(80px);
+      opacity: .45;
+      pointer-events: none;
+      z-index: 0;
+    }
+    .blob-1 { width: 520px; height: 520px; background: #7c3aed; top: -160px; left: -120px; }
+    .blob-2 { width: 420px; height: 420px; background: #0ea5e9; bottom: -140px; right: -80px; }
+    .blob-3 { width: 280px; height: 280px; background: #10b981; top: 50%; left: 55%; opacity: .2; }
 
     .wrap {
+      position: relative;
+      z-index: 1;
       width: 100%;
-      max-width: 400px;
-      padding: 20px;
+      max-width: 420px;
+      padding: 16px;
     }
 
+    /* ── Card ── */
     .card {
-      background: #1a1d2e;
-      border: 1px solid #2a2d45;
-      border-radius: 16px;
-      padding: 40px 36px 36px;
-      box-shadow: 0 24px 64px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.03);
+      background: rgba(255,255,255,0.97);
+      border-radius: 20px;
+      padding: 40px 38px 36px;
+      box-shadow:
+        0 0 0 1px rgba(0,0,0,.06),
+        0 32px 80px rgba(0,0,0,.35),
+        0 8px 24px rgba(0,0,0,.2);
     }
 
     /* ── Header ── */
     .header {
       text-align: center;
-      margin-bottom: 32px;
+      margin-bottom: 28px;
     }
 
     .icon-wrap {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 56px;
-      height: 56px;
-      background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+      width: 52px;
+      height: 52px;
+      background: linear-gradient(135deg, #7c3aed, #4f46e5);
       border-radius: 14px;
-      font-size: 26px;
-      margin-bottom: 16px;
-      box-shadow: 0 8px 24px rgba(99,102,241,.35);
+      font-size: 24px;
+      margin-bottom: 14px;
+      box-shadow: 0 6px 20px rgba(124,58,237,.4);
     }
 
     .header h1 {
-      font-size: 20px;
+      font-size: 19px;
       font-weight: 700;
-      color: #f1f5f9;
+      color: #0f172a;
       letter-spacing: -0.02em;
-      margin-bottom: 4px;
+      margin-bottom: 3px;
     }
 
     .header p {
-      font-size: 13px;
+      font-size: 12.5px;
+      color: #94a3b8;
+      letter-spacing: 0.01em;
+    }
+
+    /* ── Tabs ── */
+    .tabs {
+      display: flex;
+      background: #f1f5f9;
+      border-radius: 10px;
+      padding: 3px;
+      margin-bottom: 24px;
+    }
+
+    .tab {
+      flex: 1;
+      padding: 7px 0;
+      border: none;
+      background: transparent;
+      border-radius: 8px;
+      font-size: 13.5px;
+      font-weight: 500;
       color: #64748b;
+      cursor: pointer;
+      transition: all .15s;
+      font-family: inherit;
+    }
+
+    .tab.active {
+      background: #fff;
+      color: #0f172a;
+      box-shadow: 0 1px 4px rgba(0,0,0,.1);
     }
 
     /* ── Form ── */
-    .field {
-      margin-bottom: 16px;
-    }
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    .field { margin-bottom: 14px; }
 
     label {
       display: block;
-      font-size: 13px;
-      font-weight: 500;
-      color: #94a3b8;
-      margin-bottom: 6px;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 5px;
       letter-spacing: 0.01em;
     }
 
     input[type="text"],
     input[type="password"] {
       width: 100%;
-      padding: 10px 14px;
-      background: #111827;
-      border: 1px solid #2d3148;
-      border-radius: 8px;
-      color: #f1f5f9;
-      font-size: 15px;
+      padding: 9px 13px;
+      background: #f8fafc;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 9px;
+      color: #0f172a;
+      font-size: 14px;
       font-family: inherit;
       outline: none;
-      transition: border-color .15s, box-shadow .15s;
+      transition: border-color .15s, box-shadow .15s, background .15s;
     }
 
-    input[type="text"]:focus,
-    input[type="password"]:focus {
-      border-color: #6366f1;
-      box-shadow: 0 0 0 3px rgba(99,102,241,.2);
+    input:focus {
+      border-color: #7c3aed;
+      background: #fff;
+      box-shadow: 0 0 0 3px rgba(124,58,237,.12);
     }
 
-    input::placeholder { color: #3d4263; }
+    input::placeholder { color: #cbd5e1; }
 
-    .btn-signin {
+    .btn {
       display: block;
       width: 100%;
-      margin-top: 24px;
-      padding: 11px;
-      background: #6366f1;
+      margin-top: 20px;
+      padding: 10px;
+      background: linear-gradient(135deg, #7c3aed, #4f46e5);
       color: #fff;
-      font-size: 15px;
+      font-size: 14px;
       font-weight: 600;
       font-family: inherit;
       border: none;
-      border-radius: 8px;
+      border-radius: 9px;
       cursor: pointer;
       letter-spacing: -0.01em;
-      transition: background .15s, transform .1s, box-shadow .15s;
-      box-shadow: 0 4px 14px rgba(99,102,241,.4);
+      transition: opacity .15s, transform .1s, box-shadow .15s;
+      box-shadow: 0 4px 14px rgba(124,58,237,.4);
     }
 
-    .btn-signin:hover { background: #4f46e5; box-shadow: 0 6px 20px rgba(99,102,241,.45); }
-    .btn-signin:active { transform: scale(.98); }
-    .btn-signin:disabled { opacity: .55; cursor: not-allowed; transform: none; }
+    .btn:hover { opacity: .9; box-shadow: 0 6px 20px rgba(124,58,237,.45); }
+    .btn:active { transform: scale(.98); }
+    .btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
 
-    /* ── Error ── */
-    .error {
+    /* ── Messages ── */
+    .msg {
       display: none;
-      margin-top: 14px;
-      padding: 10px 14px;
-      background: rgba(239,68,68,.1);
-      border: 1px solid rgba(239,68,68,.3);
+      margin-top: 12px;
+      padding: 9px 13px;
       border-radius: 8px;
-      color: #fca5a5;
       font-size: 13px;
+      line-height: 1.4;
     }
 
-    /* ── Hints ── */
-    .hints {
-      margin-top: 24px;
-      padding-top: 20px;
-      border-top: 1px solid #1e2235;
-      display: flex;
-      gap: 12px;
+    .msg.error {
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      color: #dc2626;
     }
 
-    .hint {
-      flex: 1;
-      background: #111827;
-      border: 1px solid #1e2235;
-      border-radius: 8px;
-      padding: 10px 12px;
-      font-size: 12px;
-      color: #475569;
-      line-height: 1.5;
+    .msg.success {
+      background: #f0fdf4;
+      border: 1px solid #bbf7d0;
+      color: #16a34a;
     }
-
-    .hint b { color: #64748b; display: block; margin-bottom: 2px; }
-    .hint code { color: #818cf8; font-family: monospace; font-size: 12px; }
   </style>
 </head>
 <body>
+  <div class="blob blob-1"></div>
+  <div class="blob blob-2"></div>
+  <div class="blob blob-3"></div>
+
   <div class="wrap">
     <div class="card">
       <div class="header">
@@ -170,39 +207,64 @@
         <p>Node.js &middot; Express &middot; lowdb in-memory</p>
       </div>
 
-      <form id="form" autocomplete="off">
-        <div class="field">
-          <label for="username">Username</label>
-          <input id="username" type="text" placeholder="Enter username" autocomplete="username" />
-        </div>
-        <div class="field">
-          <label for="password">Password</label>
-          <input id="password" type="password" placeholder="Enter password" autocomplete="current-password" />
-        </div>
-        <button class="btn-signin" type="submit" id="btn">Sign In</button>
-        <div class="error" id="err"></div>
-      </form>
+      <div class="tabs">
+        <button class="tab active" id="tab-signin" onclick="switchTab('signin')">Sign In</button>
+        <button class="tab" id="tab-register" onclick="switchTab('register')">Create Account</button>
+      </div>
 
-      <div class="hints">
-        <div class="hint">
-          <b>Admin</b>
-          <code>admin / admin123</code>
-        </div>
-        <div class="hint">
-          <b>Guest</b>
-          <code>guest / guest123</code>
-        </div>
+      <!-- Sign In -->
+      <div class="panel active" id="panel-signin">
+        <form id="signin-form" autocomplete="off">
+          <div class="field">
+            <label for="si-username">Username</label>
+            <input id="si-username" type="text" placeholder="Enter your username" autocomplete="username" />
+          </div>
+          <div class="field">
+            <label for="si-password">Password</label>
+            <input id="si-password" type="password" placeholder="Enter your password" autocomplete="current-password" />
+          </div>
+          <button class="btn" type="submit" id="si-btn">Sign In</button>
+          <div class="msg error" id="si-err"></div>
+        </form>
+      </div>
+
+      <!-- Create Account -->
+      <div class="panel" id="panel-register">
+        <form id="register-form" autocomplete="off">
+          <div class="field">
+            <label for="reg-username">Username</label>
+            <input id="reg-username" type="text" placeholder="Choose a username" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label for="reg-password">Password</label>
+            <input id="reg-password" type="password" placeholder="Choose a password" autocomplete="new-password" />
+          </div>
+          <div class="field">
+            <label for="reg-confirm">Confirm Password</label>
+            <input id="reg-confirm" type="password" placeholder="Repeat your password" autocomplete="new-password" />
+          </div>
+          <button class="btn" type="submit" id="reg-btn">Create Account</button>
+          <div class="msg error" id="reg-err"></div>
+          <div class="msg success" id="reg-ok"></div>
+        </form>
       </div>
     </div>
   </div>
 
   <script>
-    document.getElementById('form').addEventListener('submit', async function(e) {
+    function switchTab(tab) {
+      document.getElementById('tab-signin').classList.toggle('active', tab === 'signin');
+      document.getElementById('tab-register').classList.toggle('active', tab === 'register');
+      document.getElementById('panel-signin').classList.toggle('active', tab === 'signin');
+      document.getElementById('panel-register').classList.toggle('active', tab === 'register');
+    }
+
+    document.getElementById('signin-form').addEventListener('submit', async function(e) {
       e.preventDefault();
-      const btn = document.getElementById('btn');
-      const err = document.getElementById('err');
-      const username = document.getElementById('username').value.trim();
-      const password = document.getElementById('password').value;
+      const btn = document.getElementById('si-btn');
+      const err = document.getElementById('si-err');
+      const username = document.getElementById('si-username').value.trim();
+      const password = document.getElementById('si-password').value;
 
       err.style.display = 'none';
       btn.disabled = true;
@@ -222,6 +284,44 @@
         err.style.display = 'block';
         btn.disabled = false;
         btn.textContent = 'Sign In';
+      }
+    });
+
+    document.getElementById('register-form').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const btn    = document.getElementById('reg-btn');
+      const err    = document.getElementById('reg-err');
+      const ok     = document.getElementById('reg-ok');
+      const username = document.getElementById('reg-username').value.trim();
+      const password = document.getElementById('reg-password').value;
+      const confirm  = document.getElementById('reg-confirm').value;
+
+      err.style.display = 'none';
+      ok.style.display  = 'none';
+
+      if (!username) { err.textContent = 'Username is required.'; err.style.display = 'block'; return; }
+      if (password.length < 6) { err.textContent = 'Password must be at least 6 characters.'; err.style.display = 'block'; return; }
+      if (password !== confirm) { err.textContent = 'Passwords do not match.'; err.style.display = 'block'; return; }
+
+      btn.disabled = true;
+      btn.textContent = 'Creating account…';
+
+      try {
+        const res = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Registration failed');
+        ok.textContent = 'Account created! Signing you in…';
+        ok.style.display = 'block';
+        setTimeout(() => { window.location.href = '/'; }, 900);
+      } catch (ex) {
+        err.textContent = ex.message;
+        err.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Create Account';
       }
     });
   </script>
