@@ -297,9 +297,28 @@ app.get('/{*path}', (req, res) => {
 });
 
 // ─── Start ────────────────────────────────────────────────────────────────────
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`\nDynamic Database Creator running on http://localhost:${PORT}`);
-  console.log('  Admin  → username: admin   password: admin123');
-  console.log('  Guest  → username: guest   password: guest123\n');
+const PORT = process.env.PORT || 8080;
+const HOST = '0.0.0.0';   // bind all interfaces (ethernet + localhost)
+
+const os = require('os');
+function getLocalIPs() {
+  const ifaces = os.networkInterfaces();
+  const ips = [];
+  for (const name of Object.keys(ifaces)) {
+    for (const iface of ifaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) ips.push(iface.address);
+    }
+  }
+  return ips;
+}
+
+app.listen(PORT, HOST, () => {
+  const ips = getLocalIPs();
+  console.log('\n╔══════════════════════════════════════════════╗');
+  console.log('║      Dynamic Database Creator  ✓  RUNNING  ║');
+  console.log('╚══════════════════════════════════════════════╝');
+  console.log(`\n  Local:    http://localhost:${PORT}`);
+  ips.forEach(ip => console.log(`  Network:  http://${ip}:${PORT}`));
+  console.log('\n  Admin  →  admin / admin123');
+  console.log('  Guest  →  guest / guest123\n');
 });
