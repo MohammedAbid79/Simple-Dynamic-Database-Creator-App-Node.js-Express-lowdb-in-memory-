@@ -81,6 +81,7 @@ document.querySelectorAll('.nav-btn[data-view]').forEach(btn => {
     if (btn.dataset.view === 'apikeys')   loadApiKeys();
     if (btn.dataset.view === 'query')     loadQuerySchema();
     if (btn.dataset.view === 'restapi')  loadRestApis();
+    if (btn.dataset.view === 'threats')  loadThreats();
   });
 });
 
@@ -121,6 +122,10 @@ async function bootApp() {
   // Admin-only
   document.getElementById('nav-users').style.display    = isAdmin ? '' : 'none';
   document.getElementById('nav-activity').style.display = isAdmin ? '' : 'none';
+  document.getElementById('nav-threats').style.display  = isAdmin ? '' : 'none';
+
+  // Poll threat stats every 30s for admins so the badge stays fresh
+  if (isAdmin) setInterval(refreshThreatBadge, 30_000);
 
   // Admin + member (not guest)
   document.getElementById('btn-create-db').style.display  = (isAdmin || isMember) ? '' : 'none';
@@ -1017,3 +1022,131 @@ function toggleCurl(id) {
 function copyText(text) {
   navigator.clipboard.writeText(text).then(() => toast('Copied!', 'success'));
 }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   THREAT MONITOR VIEW (admin only)
+   ════════════════════════════════════════════════════════════════════════════ */
+
+let _lastThreatCount = 0;
+
+document.getElementById('btn-refresh-threats').onclick = loadThreats;
+document.getElementById('btn-clear-threats').onclick   = async () => {
+  if (!confirm('Clear the entire threat log? This cannot be undone.')) return;
+  try {
+    await api('DELETE', '/threats');
+    _lastThreatCount = 0;
+    hideThreatBadge();
+    toast('Threat log cleared', 'success');
+    loadThreats();
+  } catch (err) { toast(err.message, 'error'); }
+};
+
+const THREAT_META = {
+  sql_injection: { icon: '💉', label: 'SQL Injection',  severityDefault: 'critical' },
+  xss_attempt:   { icon: '⚡', label: 'XSS Attempt',    severityDefault: 'high'     },
+  rate_abuse:    { icon: '🔥', label: 'Rate Abuse',     severityDefault: 'high'     },
+};
+
+const SEVERITY_CLASS = {
+  critical: 'sev-critical',
+  high:     'sev-high',
+  medium:   'sev-medium',
+  low:      'sev-low',
+};
+
+async function loadThreats() {
+  const statsEl = document.getElementById('threat-stats');
+  const listEl  = document.getElementById('threat-list');
+  listEl.innerHTML  = '<p class="empty-state">Loading…</p>';
+  statsEl.innerHTML = '';
+
+  try {
+    const [threats, stats] = await Promise.all([
+      api('GET', '/threats'),
+      api('GET', '/threats/stats'),
+    ]);
+
+    _lastThreatCount = stats.total;
+
+    // Stats row
+    statsEl.innerHTML = `
+      <div class="threat-stat-card">
+        <div class="tsc-value">${stats.total}</div>
+        <div class="tsc-label">Total Threats</div>
+      </div>
+      <div class="threat-stat-card">
+        <div class="tsc-value" style="color:var(--warn)">${stats.last24h}</div>
+        <div class="tsc-label">Last 24 h</div>
+      </div>
+      <div class="threat-stat-card">
+        <div class="tsc-value" style="color:var(--danger)">${stats.blocked}</div>
+        <div class="tsc-label">Requests Blocked</div>
+      </div>
+      <div class="threat-stat-card">
+        <div class="tsc-value" style="color:${stats.activeBlocks > 0 ? 'var(--danger)' : 'var(--success)'}">${stats.activeBlocks}</div>
+        <div class="tsc-label">Active IP Blocks</div>
+      </div>
+      <div class="threat-stat-card">
+        <div class="tsc-value" style="color:var(--danger)">${stats.byType?.sql_injection || 0}</div>
+        <div class="tsc-label">SQL Injections</div>
+      </div>
+      <div class="threat-stat-card">
+        <div class="tsc-value" style="color:var(--warn)">${stats.byType?.xss_attempt || 0}</div>
+        <div class="tsc-label">XSS Attempts</div>
+      </div>
+      <div class="threat-stat-card">
+        <div class="tsc-value" style="color:#ffa94d">${stats.byType?.rate_abuse || 0}</div>
+        <div class="tsc-label">Rate Abuses</div>
+      </div>`;
+
+    if (!threats.length) {
+      listEl.innerHTML = '<p class="empty-state" style="padding:32px">No threats detected yet. Your application is clean.</p>';
+      return;
+    }
+
+    const rows = threats.map(t => {
+      const meta = THREAT_META[t.type] || { icon: '⚠️', label: t.type };
+      const sevClass = SEVERITY_CLASS[t.severity] || 'sev-low';
+      return `<tr>
+        <td><span class="threat-severity ${sevClass}">${t.severity.toUpperCase()}</span></td>
+        <td><span class="threat-type-icon">${meta.icon}</span> ${esc(meta.label)}</td>
+        <td><code class="threat-ip">${esc(t.ip)}</code></td>
+        <td>${t.username ? `<span class="role-tag role-guest">${esc(t.username)}</span>` : '<span style="color:var(--text-muted)">—</span>'}</td>
+        <td><span class="threat-method method-${esc(t.method)}">${esc(t.method)}</span> <code style="font-size:.74rem;color:var(--text-muted)">${esc(t.endpoint)}</code></td>
+        <td class="threat-detail">${esc(t.detail)}</td>
+        <td>${t.blocked ? '<span class="blocked-badge">BLOCKED</span>' : '<span style="color:var(--text-muted)">logged</span>'}</td>
+        <td style="color:var(--text-muted);font-size:.75rem;white-space:nowrap">${fmtDate(t.timestamp)}</td>
+      </tr>`;
+    }).join('');
+
+    listEl.innerHTML = `<table>
+      <thead><tr>
+        <th>Severity</th><th>Type</th><th>IP</th><th>User</th>
+        <th>Endpoint</th><th>Detail</th><th>Action</th><th>Time</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  } catch (err) {
+    listEl.innerHTML = `<p class="empty-state" style="color:var(--danger)">${esc(err.message)}</p>`;
+  }
+}
+
+async function refreshThreatBadge() {
+  try {
+    const stats = await api('GET', '/threats/stats');
+    if (stats.total > _lastThreatCount) {
+      const badge = document.getElementById('threat-badge');
+      badge.textContent = stats.total > 99 ? '99+' : stats.total;
+      badge.classList.remove('hidden');
+    }
+  } catch (_) { /* silent */ }
+}
+
+function hideThreatBadge() {
+  document.getElementById('threat-badge').classList.add('hidden');
+}
+
+// Hide badge when the user opens the threats tab
+document.querySelector('.nav-btn[data-view="threats"]').addEventListener('click', () => {
+  hideThreatBadge();
+});

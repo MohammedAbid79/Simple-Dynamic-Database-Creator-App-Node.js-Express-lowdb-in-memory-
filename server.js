@@ -80,7 +80,177 @@ function createRateLimiter(max, windowMs) {
 const loginLimiter = createRateLimiter(10,  60 * 1000);
 const apiLimiter   = createRateLimiter(120, 60 * 1000);
 
-// ─── Express app ─────────────────────────────────────────────────────────────
+// ─── Threat Detection Engine ───────────────────────────────────────────────────
+const _threatLog  = [];           // in-memory ring buffer (max 500 entries)
+const _blockedIPs = new Map();    // ip → timestamp when block expires
+const _burstMap   = new Map();    // ip → { count, start } for 30-second burst window
+
+// Clean up stale burst windows and expired IP blocks every minute
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, e] of _burstMap)   { if (now - e.start >= 30_000)  _burstMap.delete(ip); }
+  for (const [ip, until] of _blockedIPs) { if (now >= until) _blockedIPs.delete(ip); }
+}, 60_000).unref();
+
+// SQL injection signatures — focused on the highest-confidence patterns
+const SQL_INJECTION_PATTERNS = [
+  /\bUNION\b.{0,30}\bSELECT\b/i,                          // UNION SELECT
+  /;\s*(DROP|TRUNCATE|DELETE\s+FROM|ALTER|CREATE)\s+/i,   // ; DROP TABLE …
+  /'\s*(OR|AND)\s+['"\d\w]/i,                             // ' OR '1
+  /'\s*=\s*'[\s\d]/,                                      // '='  or  '=' 1
+  /\bEXEC(UTE)?\s*[\(@]/i,                                // EXEC( / EXEC @
+  /\bxp_\w+/i,                                            // xp_cmdshell etc
+  /\bWAITFOR\s+DELAY\b/i,                                 // time-based blind
+  /\bSLEEP\s*\(\s*\d/i,                                   // SLEEP(5)
+  /\bBENCHMARK\s*\(\s*\d/i,                               // BENCHMARK(n,expr)
+  /0x[0-9a-f]{4,}/i,                                      // hex-encoded payloads
+];
+
+// XSS signatures
+const XSS_PATTERNS = [
+  /<script[\s>/]/i,
+  /javascript\s*:/i,
+  /on(?:click|load|error|mouseover|focus|blur|input|submit)\s*=/i,
+  /<iframe[\s>/]/i,
+  /eval\s*\(/i,
+];
+
+function addThreat({ type, severity, ip, username, method, endpoint, detail, blocked }) {
+  const entry = {
+    id:        uuidv4(),
+    type,
+    severity,
+    ip:        ip || 'unknown',
+    username:  username || null,
+    method:    method || '',
+    endpoint:  endpoint || '',
+    detail,
+    blocked:   !!blocked,
+    timestamp: new Date().toISOString(),
+  };
+  _threatLog.push(entry);
+  if (_threatLog.length > 500) _threatLog.shift();
+  console.warn(`[THREAT] ${severity.toUpperCase()} | ${type} | ${ip} | ${detail}`);
+  return entry;
+}
+
+// Returns true (and records + blocks) if this request looks like a burst attack
+function checkBurstAbuse(req) {
+  const ip  = req.ip || req.socket.remoteAddress || 'unknown';
+  const now = Date.now();
+
+  // Is IP already blocked?
+  const blockedUntil = _blockedIPs.get(ip);
+  if (blockedUntil && now < blockedUntil) return true;
+
+  let e = _burstMap.get(ip);
+  if (!e || now - e.start >= 30_000) {
+    e = { count: 0, start: now };
+    _burstMap.set(ip, e);
+  }
+  e.count++;
+
+  if (e.count === 101) {   // fire once exactly at the threshold
+    const user = getAuthUser(req);
+    addThreat({
+      type:     'rate_abuse',
+      severity: 'high',
+      ip,
+      username: user?.username || null,
+      method:   req.method,
+      endpoint: req.path,
+      detail:   `${e.count} requests in ${Math.round((now - e.start) / 1000)}s (burst window)`,
+      blocked:  true,
+    });
+    _blockedIPs.set(ip, now + 5 * 60_000);  // block for 5 minutes
+    return true;
+  }
+  return e.count > 101 && _blockedIPs.has(ip);
+}
+
+// Scan a single string value for injection patterns
+function scanValue(value, fieldPath, req) {
+  if (typeof value !== 'string') return false;
+  const ip   = req.ip || 'unknown';
+  const user = getAuthUser(req);
+
+  for (const pat of SQL_INJECTION_PATTERNS) {
+    if (pat.test(value)) {
+      addThreat({
+        type: 'sql_injection', severity: 'critical', ip,
+        username: user?.username || null,
+        method: req.method, endpoint: req.path,
+        detail: `SQL pattern matched in "${fieldPath}": ${value.slice(0, 120)}`,
+        blocked: true,
+      });
+      return true;
+    }
+  }
+  for (const pat of XSS_PATTERNS) {
+    if (pat.test(value)) {
+      addThreat({
+        type: 'xss_attempt', severity: 'high', ip,
+        username: user?.username || null,
+        method: req.method, endpoint: req.path,
+        detail: `XSS pattern matched in "${fieldPath}": ${value.slice(0, 120)}`,
+        blocked: true,
+      });
+      return true;
+    }
+  }
+  return false;
+}
+
+// Recursively scan an object/flat value; returns true if a threat was found
+function scanObject(obj, req, prefix) {
+  if (obj === null || obj === undefined) return false;
+  if (typeof obj === 'string') return scanValue(obj, prefix || 'value', req);
+  if (typeof obj !== 'object') return false;
+  for (const [k, v] of Object.entries(obj)) {
+    const path = prefix ? `${prefix}.${k}` : k;
+    if (typeof v === 'string' && scanValue(v, path, req)) return true;
+    if (v && typeof v === 'object' && scanObject(v, req, path)) return true;
+  }
+  return false;
+}
+
+// Main threat-detection middleware — applied to all /api routes
+function threatDetection(req, res, next) {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+
+  // 1. Blocked IP check
+  const blockedUntil = _blockedIPs.get(ip);
+  if (blockedUntil && Date.now() < blockedUntil) {
+    return res.status(403).json({
+      error:      'Access temporarily blocked due to suspicious activity.',
+      retryAfter: Math.ceil((blockedUntil - Date.now()) / 1000),
+    });
+  }
+
+  // 2. Burst-rate abuse (>100 req / 30 s per IP)
+  if (checkBurstAbuse(req)) {
+    return res.status(429).json({
+      error:      'Too many requests. Your IP has been temporarily blocked for 5 minutes.',
+      retryAfter: 300,
+    });
+  }
+
+  // 3. Injection scan — skip /query (intentionally accepts SQL) and /auth (passwords)
+  const skip = req.path === '/query' || req.path.startsWith('/auth');
+  if (!skip) {
+    if (req.body && scanObject(req.body, req, 'body')) {
+      return res.status(400).json({ error: 'Request blocked: injection pattern detected.' });
+    }
+    if (req.query && Object.keys(req.query).length && scanObject(req.query, req, 'query')) {
+      return res.status(400).json({ error: 'Request blocked: injection pattern detected.' });
+    }
+  }
+
+  next();
+}
+
+// Apply threat detection after the general rate limiter, before all routes
+
 const app = express();
 
 app.use(express.json());
@@ -112,6 +282,7 @@ app.use(session({
 
 // Apply general rate limit to all /api routes
 app.use('/api', apiLimiter);
+app.use('/api', threatDetection);
 
 // ─── Auth middleware ──────────────────────────────────────────────────────────
 function requireAuth(req, res, next) {
@@ -598,6 +769,37 @@ app.post('/api/query', requireAuth, (req, res) => {
     databases.forEach(d => delete alasql.tables[d.name]);
     _queryLock = false;
   }
+});
+
+// ─── Threat log endpoints (admin only) ────────────────────────────────────────
+app.get('/api/threats', requireAdmin, (req, res) => {
+  res.json([..._threatLog].reverse().slice(0, 200));
+});
+
+app.get('/api/threats/stats', requireAdmin, (req, res) => {
+  const since24h = new Date(Date.now() - 86_400_000).toISOString();
+  const byType     = {};
+  const bySeverity = {};
+  let blocked = 0;
+  for (const t of _threatLog) {
+    byType[t.type]         = (byType[t.type]         || 0) + 1;
+    bySeverity[t.severity] = (bySeverity[t.severity] || 0) + 1;
+    if (t.blocked) blocked++;
+  }
+  res.json({
+    total:        _threatLog.length,
+    last24h:      _threatLog.filter(t => t.timestamp >= since24h).length,
+    blocked,
+    activeBlocks: _blockedIPs.size,
+    byType,
+    bySeverity,
+  });
+});
+
+// DELETE /api/threats — clear threat log (admin)
+app.delete('/api/threats', requireAdmin, (req, res) => {
+  _threatLog.length = 0;
+  res.json({ message: 'Threat log cleared' });
 });
 
 // ─── Automatic REST API Generator (/api/v1) ───────────────────────────────────
