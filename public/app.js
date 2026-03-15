@@ -86,6 +86,7 @@ document.querySelectorAll('.nav-btn[data-view]').forEach(btn => {
     if (btn.dataset.view === 'threats')     loadThreats();
     if (btn.dataset.view === 'webhooks')    loadWebhooks();
     if (btn.dataset.view === 'credentials') loadCredentials();
+    if (btn.dataset.view === 'backups')     loadBackups();
   });
 });
 
@@ -128,6 +129,7 @@ async function bootApp() {
   document.getElementById('nav-activity').style.display    = isAdmin ? '' : 'none';
   document.getElementById('nav-threats').style.display     = isAdmin ? '' : 'none';
   document.getElementById('nav-credentials').style.display = isAdmin ? '' : 'none';
+  document.getElementById('nav-backups').style.display     = isAdmin ? '' : 'none';
 
   // Poll threat stats every 30s for admins so the badge stays fresh
   if (isAdmin) setInterval(refreshThreatBadge, 30_000);
@@ -1940,3 +1942,125 @@ function deleteCredential(id, name) {
 
 document.getElementById('btn-add-credential').onclick = openAddCredentialModal;
 
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Backups
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+function fmtBytes(b) {
+  if (b < 1024)         return `${b} B`;
+  if (b < 1024 * 1024)  return `${(b / 1024).toFixed(1)} KB`;
+  return `${(b / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function backupTypeLabel(filename) {
+  if (filename.startsWith('full_')) return '<span class="bk-badge bk-badge-full">Full</span>';
+  return '<span class="bk-badge bk-badge-db">Database</span>';
+}
+
+async function loadBackups() {
+  const listEl = document.getElementById('backup-list');
+  listEl.innerHTML = '<p class="empty-state">Loading backups…</p>';
+  try {
+    const files = await api('GET', '/backups');
+    renderBackupList(files);
+  } catch (err) {
+    listEl.innerHTML = `<p class="empty-state" style="color:var(--danger)">${esc(err.message)}</p>`;
+  }
+}
+
+function renderBackupList(files) {
+  const listEl = document.getElementById('backup-list');
+  if (!files.length) {
+    listEl.innerHTML = '<p class="empty-state">No backups yet. Click <strong>Create Backup</strong> to save a snapshot.</p>';
+    return;
+  }
+
+  const rows = files.map(f => `
+    <tr>
+      <td class="bk-name">
+        ${backupTypeLabel(f.filename)}
+        <span class="bk-filename">${esc(f.filename)}</span>
+      </td>
+      <td class="bk-size">${fmtBytes(f.size)}</td>
+      <td class="bk-date">${new Date(f.createdAt).toLocaleString()}</td>
+      <td class="bk-actions">
+        <button class="btn btn-outline btn-xs" onclick="downloadBackup('${esc(f.filename)}')">&#8659; Download</button>
+        <button class="btn btn-primary btn-xs" onclick="confirmRestore('${esc(f.filename)}')">&#8635; Restore</button>
+        <button class="btn btn-danger btn-xs" onclick="confirmDeleteBackup('${esc(f.filename)}')">&#128465;</button>
+      </td>
+    </tr>`).join('');
+
+  listEl.innerHTML = `
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Size</th>
+            <th>Created</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+async function createBackup() {
+  const btn = document.getElementById('btn-create-backup');
+  btn.disabled = true;
+  btn.textContent = 'Creating…';
+  try {
+    const result = await api('POST', '/backup');
+    toast(`Backup created — ${result.files.length} file(s) written`, 'success');
+    loadBackups();
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '&#8659; Create Backup';
+  }
+}
+
+function downloadBackup(filename) {
+  window.open(`/api/backup/${encodeURIComponent(filename)}`, '_blank');
+}
+
+function confirmRestore(filename) {
+  const isFullBackup = filename.startsWith('full_');
+  const warning = isFullBackup
+    ? '<p style="color:var(--danger);margin-top:8px;font-size:.84rem"><strong>Full restore:</strong> This will replace ALL databases, records, users, API keys, webhooks and credentials with the backup contents.</p>'
+    : '<p style="color:var(--warn);margin-top:8px;font-size:.84rem"><strong>Database restore:</strong> The database and its records from this backup will be merged/replaced. Other data is untouched.</p>';
+
+  openModal('Restore Backup', `
+    <p>Restore from <strong>${esc(filename)}</strong>?</p>
+    ${warning}
+    <p style="color:var(--text-muted);font-size:.84rem;margin-top:6px">The page will reload after a successful full restore.</p>
+  `, async () => {
+    try {
+      const result = await api('POST', '/restore', { filename });
+      closeModal();
+      toast(result.message, 'success');
+      if (isFullBackup) setTimeout(() => location.reload(), 1200);
+      else loadBackups();
+    } catch (err) { toast(err.message, 'error'); }
+  }, 'Restore');
+}
+
+function confirmDeleteBackup(filename) {
+  openModal('Delete Backup', `
+    <p>Permanently delete <strong>${esc(filename)}</strong>?</p>
+    <p style="color:var(--text-muted);font-size:.84rem;margin-top:8px">This cannot be undone.</p>
+  `, async () => {
+    try {
+      await api('DELETE', `/backup/${encodeURIComponent(filename)}`);
+      closeModal();
+      toast('Backup deleted', 'success');
+      loadBackups();
+    } catch (err) { toast(err.message, 'error'); }
+  }, 'Delete');
+}
+
+document.getElementById('btn-create-backup').onclick  = createBackup;
+document.getElementById('btn-refresh-backups').onclick = loadBackups;

@@ -7,9 +7,14 @@ const crypto     = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const path       = require('path');
 const os         = require('os');
+const fs         = require('fs');
 const swaggerUi  = require('swagger-ui-express');
 const swaggerSpec = require('./swagger');
 const alasql     = require('alasql');
+
+// ─── Backup directory ─────────────────────────────────────────────────────────
+const BACKUP_DIR = path.join(__dirname, 'backup');
+if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
 
 // ─── In-Memory lowdb setup ────────────────────────────────────────────────────
 const low    = require('lowdb');
@@ -1346,6 +1351,173 @@ app.post('/api/import', requireMember, (req, res) => {
 
   res.status(201).json({ database: newDb, imported, skipped });
 });
+
+// ─── Backup helpers ───────────────────────────────────────────────────────────
+function dateTag(d = new Date()) {
+  const y  = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, '0');
+  const dy = String(d.getDate()).padStart(2, '0');
+  return `${y}_${mo}_${dy}`;
+}
+
+function slugify(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+}
+
+function writeBackup(tag) {
+  const databases = db.get('databases').value();
+  const records   = db.get('records').value();
+  const written   = [];
+
+  // Per-database files  e.g. backup/users_2026_03_14.json
+  for (const d of databases) {
+    const dbRecords = records.filter(r => r.databaseId === d.id);
+    const filename  = `${slugify(d.name)}_${tag}.json`;
+    const filepath  = path.join(BACKUP_DIR, filename);
+    fs.writeFileSync(filepath, JSON.stringify({ database: d, records: dbRecords }, null, 2));
+    written.push(filename);
+  }
+
+  // Full snapshot  e.g. backup/full_2026_03_14.json
+  const fullFilename = `full_${tag}.json`;
+  const fullFilepath = path.join(BACKUP_DIR, fullFilename);
+  const snapshot = {
+    version:     1,
+    createdAt:   new Date().toISOString(),
+    databases:   databases,
+    records:     records,
+    users:       db.get('users').value(),
+    apiKeys:     db.get('apiKeys').value(),
+    webhooks:    db.get('webhooks').value(),
+    credentials: db.get('credentials').value(),
+    activityLog: db.get('activityLog').value(),
+  };
+  fs.writeFileSync(fullFilepath, JSON.stringify(snapshot, null, 2));
+  written.push(fullFilename);
+
+  return written;
+}
+
+// ─── Backup routes ────────────────────────────────────────────────────────────
+
+// POST /api/backup  — create a backup now (admin only)
+app.post('/api/backup', requireAdmin, (req, res) => {
+  const user = getAuthUser(req);
+  try {
+    const tag   = dateTag();
+    const files = writeBackup(tag);
+    logActivity('backup_created', user.username, 'backup', `${files.length} file(s) written`);
+    res.json({ message: 'Backup created', files });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/backups  — list all backup files (admin only)
+app.get('/api/backups', requireAdmin, (req, res) => {
+  try {
+    const files = fs.readdirSync(BACKUP_DIR)
+      .filter(f => f.endsWith('.json'))
+      .map(f => {
+        const stat = fs.statSync(path.join(BACKUP_DIR, f));
+        return { filename: f, size: stat.size, createdAt: stat.mtime.toISOString() };
+      })
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    res.json(files);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/backup/:filename  — download a specific backup file (admin only)
+app.get('/api/backup/:filename', requireAdmin, (req, res) => {
+  const safe = path.basename(req.params.filename);
+  if (!safe.endsWith('.json')) return res.status(400).json({ error: 'Invalid filename' });
+  const filepath = path.join(BACKUP_DIR, safe);
+  if (!fs.existsSync(filepath)) return res.status(404).json({ error: 'Backup not found' });
+  res.download(filepath, safe);
+});
+
+// DELETE /api/backup/:filename  — delete a specific backup file (admin only)
+app.delete('/api/backup/:filename', requireAdmin, (req, res) => {
+  const user = getAuthUser(req);
+  const safe = path.basename(req.params.filename);
+  if (!safe.endsWith('.json')) return res.status(400).json({ error: 'Invalid filename' });
+  const filepath = path.join(BACKUP_DIR, safe);
+  if (!fs.existsSync(filepath)) return res.status(404).json({ error: 'Backup not found' });
+  fs.unlinkSync(filepath);
+  logActivity('backup_deleted', user.username, safe, '');
+  res.json({ message: 'Backup deleted' });
+});
+
+// POST /api/restore  — restore from an existing backup file (admin only)
+app.post('/api/restore', requireAdmin, (req, res) => {
+  const user = getAuthUser(req);
+  const { filename } = req.body;
+  if (!filename) return res.status(400).json({ error: 'filename required' });
+
+  const safe = path.basename(filename);
+  if (!safe.endsWith('.json')) return res.status(400).json({ error: 'Invalid filename' });
+  const filepath = path.join(BACKUP_DIR, safe);
+  if (!fs.existsSync(filepath)) return res.status(404).json({ error: 'Backup file not found' });
+
+  let snap;
+  try {
+    snap = JSON.parse(fs.readFileSync(filepath, 'utf8'));
+  } catch (e) {
+    return res.status(400).json({ error: 'Could not parse backup file' });
+  }
+
+  // Full snapshot restore (contains "version" key)
+  if (snap.version) {
+    if (snap.databases)   db.set('databases',   snap.databases).write();
+    if (snap.records)     db.set('records',     snap.records).write();
+    if (snap.users)       db.set('users',       snap.users).write();
+    if (snap.apiKeys)     db.set('apiKeys',     snap.apiKeys).write();
+    if (snap.webhooks)    db.set('webhooks',    snap.webhooks).write();
+    if (snap.credentials) db.set('credentials', snap.credentials).write();
+    logActivity('restore_full', user.username, safe,
+      `${(snap.databases||[]).length} db(s), ${(snap.records||[]).length} record(s)`);
+    return res.json({
+      message: 'Full restore complete',
+      databases: (snap.databases || []).length,
+      records:   (snap.records   || []).length,
+    });
+  }
+
+  // Per-database file restore (contains "database" + "records" keys)
+  if (snap.database && Array.isArray(snap.records)) {
+    const existing = db.get('databases').find({ id: snap.database.id }).value();
+    if (existing) {
+      db.get('databases').find({ id: snap.database.id }).assign(snap.database).write();
+    } else {
+      db.get('databases').push(snap.database).write();
+    }
+    // Replace records for this database
+    const others = db.get('records').filter(r => r.databaseId !== snap.database.id).value();
+    db.set('records', [...others, ...snap.records]).write();
+    logActivity('restore_db', user.username, snap.database.name,
+      `${snap.records.length} record(s) restored`);
+    return res.json({
+      message: `Restored database "${snap.database.name}"`,
+      records: snap.records.length,
+    });
+  }
+
+  res.status(400).json({ error: 'Unrecognised backup format' });
+});
+
+// ─── Scheduled auto-backup (every 24 hours) ───────────────────────────────────
+setInterval(() => {
+  try {
+    const tag   = dateTag();
+    const files = writeBackup(tag);
+    console.log(`[AutoBackup] ${new Date().toISOString()} — ${files.length} file(s) written`);
+    logActivity('backup_auto', 'system', 'backup', `${files.length} file(s)`);
+  } catch (err) {
+    console.error('[AutoBackup] Error:', err.message);
+  }
+}, 24 * 60 * 60 * 1000).unref();
 
 // ─── Serve SPA ────────────────────────────────────────────────────────────────
 app.get('/login', (req, res) => {

@@ -2030,3 +2030,60 @@ select option { background: var(--surface2); }
   margin-right: 6px;
   white-space: nowrap;
 }
+
+/* ── Backups ─────────────────────────────────────────────────────────────────── */
+
+.bk-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bk-filename {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: .82rem;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.bk-size, .bk-date {
+  font-size: .82rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.bk-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Type badge */
+.bk-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.bk-badge-full {
+  background: rgba(101,116,255,.18);
+  color: var(--accent-h);
+  border: 1px solid rgba(101,116,255,.3);
+}
+.bk-badge-db {
+  background: rgba(45,206,137,.15);
+  color: var(--success);
+  border: 1px solid rgba(45,206,137,.25);
+}
+
+/* XS button variant */
+.btn.btn-xs {
+  padding: 3px 9px;
+  font-size: .72rem;
+  line-height: 1.5;
+}
