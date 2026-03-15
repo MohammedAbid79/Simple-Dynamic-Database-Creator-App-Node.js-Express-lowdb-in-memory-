@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FluxDB</title>
-  <link rel="stylesheet" href="/style.css?v=10" />
+  <link rel="stylesheet" href="/style.css?v=11" />
 </head>
 <body>
   <!-- ── App Shell ── -->
@@ -88,6 +88,15 @@
             <path d="M3 6l2.5-2.5"/>
           </svg>
           <span class="nav-label">Webhooks</span>
+        </button>
+
+        <button class="nav-btn" id="nav-credentials" data-view="credentials" title="Credentials Vault" style="display:none">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="9" width="14" height="9" rx="2"/>
+            <path d="M7 9V6a3 3 0 0 1 6 0v3"/>
+            <circle cx="10" cy="13.5" r="1.2" fill="currentColor" stroke="none"/>
+          </svg>
+          <span class="nav-label">Credentials</span>
         </button>
 
         <button class="nav-btn" id="nav-apikeys" data-view="apikeys" title="API Keys" style="display:none">
@@ -219,6 +228,16 @@
         <div id="webhook-list"></div>
       </div>
 
+      <!-- Credentials Vault View (admin only) -->
+      <div id="view-credentials" class="view">
+        <div class="view-header">
+          <h2>Credentials Vault</h2>
+          <button id="btn-add-credential" class="btn btn-primary">+ Add Credential</button>
+        </div>
+        <p class="apikey-hint">Store sensitive secrets (API keys, tokens, passwords) for admin eyes only. Values are masked in the list — click <strong>Reveal</strong> to view a value. All reveal actions are audit-logged.</p>
+        <div id="credential-list" class="cred-list"></div>
+      </div>
+
       <!-- REST API Generator View -->
       <div id="view-restapi" class="view">
         <div class="view-header">
@@ -254,6 +273,6 @@
   <!-- Toast -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/app.js?v=8"></script>
+  <script src="/app.js?v=9"></script>
 </body>
 </html>

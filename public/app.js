@@ -81,9 +81,10 @@ document.querySelectorAll('.nav-btn[data-view]').forEach(btn => {
     if (btn.dataset.view === 'activity')  loadActivity();
     if (btn.dataset.view === 'apikeys')   loadApiKeys();
     if (btn.dataset.view === 'query')     loadQuerySchema();
-    if (btn.dataset.view === 'restapi')  loadRestApis();
-    if (btn.dataset.view === 'threats')  loadThreats();
-    if (btn.dataset.view === 'webhooks') loadWebhooks();
+    if (btn.dataset.view === 'restapi')     loadRestApis();
+    if (btn.dataset.view === 'threats')     loadThreats();
+    if (btn.dataset.view === 'webhooks')    loadWebhooks();
+    if (btn.dataset.view === 'credentials') loadCredentials();
   });
 });
 
@@ -122,9 +123,10 @@ async function bootApp() {
   const isMember = role === 'member';
 
   // Admin-only
-  document.getElementById('nav-users').style.display    = isAdmin ? '' : 'none';
-  document.getElementById('nav-activity').style.display = isAdmin ? '' : 'none';
-  document.getElementById('nav-threats').style.display  = isAdmin ? '' : 'none';
+  document.getElementById('nav-users').style.display       = isAdmin ? '' : 'none';
+  document.getElementById('nav-activity').style.display    = isAdmin ? '' : 'none';
+  document.getElementById('nav-threats').style.display     = isAdmin ? '' : 'none';
+  document.getElementById('nav-credentials').style.display = isAdmin ? '' : 'none';
 
   // Poll threat stats every 30s for admins so the badge stays fresh
   if (isAdmin) setInterval(refreshThreatBadge, 30_000);
@@ -1607,4 +1609,156 @@ async function doImport() {
 // ── Wire up the button ────────────────────────────────────────────────────────
 
 document.getElementById('btn-import-dataset').onclick = openImportWizard;
+
+/* ── Credentials Vault ──────────────────────────────────────────────────────── */
+
+async function loadCredentials() {
+  const wrap = document.getElementById('credential-list');
+  wrap.innerHTML = '<p class="empty-state">Loading…</p>';
+  try {
+    const creds = await api('GET', '/credentials');
+    if (!creds.length) {
+      wrap.innerHTML = '<p class="empty-state">No credentials stored yet. Click <strong>+ Add Credential</strong> to store your first secret.</p>';
+      return;
+    }
+    wrap.innerHTML = creds.map(renderCredentialCard).join('');
+  } catch (err) { wrap.innerHTML = `<p class="empty-state" style="color:var(--danger)">${esc(err.message)}</p>`; }
+}
+
+function renderCredentialCard(c) {
+  const age = fmtDate(c.updatedAt || c.createdAt);
+  return `
+    <div class="cred-card" id="cred-${c.id}">
+      <div class="cred-main">
+        <div class="cred-header">
+          <span class="cred-name">${esc(c.name)}</span>
+          <span class="cred-meta">by ${esc(c.createdBy)} · ${age}</span>
+        </div>
+        ${c.description ? `<p class="cred-desc">${esc(c.description)}</p>` : ''}
+        <div class="cred-value-row">
+          <span class="cred-mask" id="cval-${c.id}">••••••••••••</span>
+          <button class="btn btn-ghost btn-sm cred-reveal-btn" onclick="revealCredential('${c.id}')">&#128065; Reveal</button>
+          <button class="btn btn-ghost btn-sm cred-copy-btn hidden" id="ccopy-${c.id}" onclick="copyCredential('${c.id}')">&#128203; Copy</button>
+        </div>
+      </div>
+      <div class="cred-actions">
+        <button class="btn btn-outline btn-sm" onclick="editCredential('${c.id}', '${esc(c.name)}', '${esc(c.description || '')}')">&#9998; Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteCredential('${c.id}', '${esc(c.name)}')">&#128465; Delete</button>
+      </div>
+    </div>`;
+}
+
+async function revealCredential(id) {
+  try {
+    const { value } = await api('GET', `/credentials/${id}/reveal`);
+    const maskEl  = document.getElementById(`cval-${id}`);
+    const copyBtn = document.getElementById(`ccopy-${id}`);
+    maskEl.textContent  = value;
+    maskEl.classList.add('cred-revealed');
+    copyBtn.classList.remove('hidden');
+    copyBtn.dataset.value = value;
+    // Auto-hide after 30 seconds
+    setTimeout(() => {
+      maskEl.textContent  = '••••••••••••';
+      maskEl.classList.remove('cred-revealed');
+      copyBtn.classList.add('hidden');
+      delete copyBtn.dataset.value;
+    }, 30_000);
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+function copyCredential(id) {
+  const btn = document.getElementById(`ccopy-${id}`);
+  const value = btn.dataset.value;
+  if (!value) return;
+  navigator.clipboard.writeText(value).then(() => {
+    const orig = btn.innerHTML;
+    btn.innerHTML = '&#10003; Copied';
+    setTimeout(() => { btn.innerHTML = orig; }, 1500);
+  }).catch(() => toast('Clipboard access denied', 'error'));
+}
+
+function openAddCredentialModal() {
+  openModal('Add Credential', `
+    <div class="form-group">
+      <label class="form-label">Name <span style="color:var(--danger)">*</span></label>
+      <input id="cred-name-inp" class="input" placeholder="e.g. Stripe API Key" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">Value <span style="color:var(--danger)">*</span></label>
+      <div style="position:relative">
+        <input id="cred-value-inp" class="input" type="password" placeholder="sk_live_…" style="padding-right:80px" />
+        <button type="button" class="btn btn-ghost btn-sm" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);font-size:.74rem"
+          onclick="this.previousElementSibling.type=this.previousElementSibling.type==='password'?'text':'password';this.textContent=this.previousElementSibling.type==='password'?'Show':'Hide'">Show</button>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Description <span style="color:var(--text-muted)">(optional)</span></label>
+      <input id="cred-desc-inp" class="input" placeholder="What is this used for?" />
+    </div>
+  `, async () => {
+    const name  = document.getElementById('cred-name-inp').value.trim();
+    const value = document.getElementById('cred-value-inp').value;
+    const desc  = document.getElementById('cred-desc-inp').value.trim();
+    if (!name)  { toast('Name is required', 'error'); return; }
+    if (!value) { toast('Value is required', 'error'); return; }
+    try {
+      await api('POST', '/credentials', { name, value, description: desc });
+      closeModal();
+      toast('Credential saved', 'success');
+      loadCredentials();
+    } catch (err) { toast(err.message, 'error'); }
+  }, 'Save');
+}
+
+function editCredential(id, currentName, currentDesc) {
+  openModal('Edit Credential', `
+    <div class="form-group">
+      <label class="form-label">Name</label>
+      <input id="cred-edit-name" class="input" value="${esc(currentName)}" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">New Value <span style="color:var(--text-muted)">(leave blank to keep existing)</span></label>
+      <div style="position:relative">
+        <input id="cred-edit-value" class="input" type="password" placeholder="Enter new value to update…" style="padding-right:80px" />
+        <button type="button" class="btn btn-ghost btn-sm" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);font-size:.74rem"
+          onclick="this.previousElementSibling.type=this.previousElementSibling.type==='password'?'text':'password';this.textContent=this.previousElementSibling.type==='password'?'Show':'Hide'">Show</button>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Description</label>
+      <input id="cred-edit-desc" class="input" value="${esc(currentDesc)}" />
+    </div>
+  `, async () => {
+    const updates = {};
+    const name  = document.getElementById('cred-edit-name').value.trim();
+    const value = document.getElementById('cred-edit-value').value;
+    const desc  = document.getElementById('cred-edit-desc').value.trim();
+    if (name)  updates.name = name;
+    if (value) updates.value = value;
+    updates.description = desc;
+    try {
+      await api('PUT', `/credentials/${id}`, updates);
+      closeModal();
+      toast('Credential updated', 'success');
+      loadCredentials();
+    } catch (err) { toast(err.message, 'error'); }
+  }, 'Update');
+}
+
+function deleteCredential(id, name) {
+  openModal('Delete Credential', `
+    <p>Are you sure you want to permanently delete <strong>${esc(name)}</strong>?</p>
+    <p style="color:var(--text-muted);font-size:.84rem;margin-top:8px">This cannot be undone.</p>
+  `, async () => {
+    try {
+      await api('DELETE', `/credentials/${id}`);
+      closeModal();
+      toast('Credential deleted', 'success');
+      loadCredentials();
+    } catch (err) { toast(err.message, 'error'); }
+  }, 'Delete');
+}
+
+document.getElementById('btn-add-credential').onclick = openAddCredentialModal;
 

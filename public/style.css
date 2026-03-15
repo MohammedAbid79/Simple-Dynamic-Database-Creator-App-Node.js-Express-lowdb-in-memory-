@@ -1720,3 +1720,85 @@ select option { background: var(--surface2); }
 }
 .import-preview-table tr:last-child td { border-bottom: none; }
 .import-preview-table td { color: var(--text-muted); }
+
+/* ── Credentials Vault ──────────────────────────────────────────────────────── */
+.cred-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cred-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  transition: border-color var(--t) var(--ease);
+}
+.cred-card:hover { border-color: var(--border-h); }
+
+.cred-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+
+.cred-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.cred-name {
+  font-size: .95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.cred-meta {
+  font-size: .76rem;
+  color: var(--text-muted);
+}
+.cred-desc {
+  margin: 0;
+  font-size: .83rem;
+  color: var(--text-muted);
+}
+
+.cred-value-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.cred-mask {
+  font-family: var(--font-mono, monospace);
+  font-size: .85rem;
+  color: var(--text-muted);
+  letter-spacing: .1em;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 9px;
+  min-width: 120px;
+  transition: color var(--t) var(--ease);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 360px;
+  white-space: nowrap;
+}
+.cred-mask.cred-revealed {
+  color: var(--text);
+  background: rgba(100,210,255,.05);
+  border-color: var(--accent);
+  letter-spacing: 0;
+}
+
+.cred-reveal-btn { font-size: .76rem; }
+.cred-copy-btn   { font-size: .76rem; }
+
+.cred-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+}
