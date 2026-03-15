@@ -166,32 +166,68 @@ function navigate(view) {
    DASHBOARD VIEW
    ════════════════════════════════════════════════════════════════════════════ */
 
+/* SVG icon helpers — match the nav-icon style (20×20, stroke only, round caps) */
+const _svgI = (path, extra = '') =>
+  `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" ${extra}>${path}</svg>`;
+
+const DASH_ICONS = {
+  databases:   _svgI('<ellipse cx="10" cy="5.5" rx="6.5" ry="2.3"/><path d="M3.5 5.5v4c0 1.27 2.91 2.3 6.5 2.3s6.5-1.03 6.5-2.3v-4"/><path d="M3.5 9.5v4c0 1.27 2.91 2.3 6.5 2.3s6.5-1.03 6.5-2.3v-4"/>'),
+  records:     _svgI('<path d="M5 3h7l3 3v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M12 3v4h4"/><path d="M7 10h6M7 13h4"/>'),
+  users:       _svgI('<circle cx="8" cy="6.5" r="3"/><path d="M2 17c0-3.31 2.69-6 6-6s6 2.69 6 6"/><path d="M14.5 4.5a2.5 2.5 0 0 1 0 5"/><path d="M18 17a4 4 0 0 0-4-4"/>'),
+  apiKeys:     _svgI('<circle cx="7.5" cy="10" r="4.5"/><path d="M12 10h6"/><path d="M15.5 7.5v5"/>'),
+  webhooks:    _svgI('<circle cx="10" cy="10" r="7.5"/><path d="M7.5 10c0-1.38 1.12-2.5 2.5-2.5s2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2"/>'),
+  credentials: _svgI('<rect x="3" y="9" width="14" height="9" rx="2"/><path d="M7 9V6a3 3 0 0 1 6 0v3"/><circle cx="10" cy="13.5" r="1.2" fill="currentColor" stroke="none"/>'),
+  threats:     _svgI('<path d="M10 2l7 4v5c0 4-3 6.5-7 8-4-1.5-7-4-7-8V6z"/><path d="M10 8v3"/><circle cx="10" cy="13" r=".7" fill="currentColor" stroke="none"/>'),
+};
+
+/* Activity dot colors by category */
+const DASH_ACT_COLOR = {
+  create: 'var(--success)',
+  update: 'var(--accent)',
+  delete: 'var(--danger)',
+  import: 'var(--accent)',
+  reveal: 'var(--warn)',
+  login:  'var(--success)',
+  logout: 'var(--text-muted)',
+  default:'var(--text-muted)',
+};
+
+function _actColor(action) {
+  if (action.startsWith('create') || action === 'login')  return DASH_ACT_COLOR.create;
+  if (action.startsWith('update'))  return DASH_ACT_COLOR.update;
+  if (action.startsWith('delete'))  return DASH_ACT_COLOR.delete;
+  if (action === 'import_dataset')  return DASH_ACT_COLOR.import;
+  if (action === 'reveal_credential') return DASH_ACT_COLOR.reveal;
+  if (action === 'logout')          return DASH_ACT_COLOR.logout;
+  return DASH_ACT_COLOR.default;
+}
+
 const DASH_STAT_META = {
-  databases:   { label: 'Databases',    icon: '🗄',  color: 'var(--accent)',   link: 'databases'  },
-  records:     { label: 'Records',      icon: '📄',  color: 'var(--success)',  link: 'databases'  },
-  users:       { label: 'Users',        icon: '👤',  color: 'var(--warn)',     link: 'users'      },
-  apiKeys:     { label: 'API Keys',     icon: '🔑',  color: 'var(--accent-h)', link: 'apikeys'    },
-  webhooks:    { label: 'Webhooks',     icon: '🔗',  color: 'var(--accent)',   link: 'webhooks'   },
-  credentials: { label: 'Credentials', icon: '🔐',  color: 'var(--warn)',     link: 'credentials'},
+  databases:   { label: 'Databases',   color: 'var(--accent)',    link: 'databases'   },
+  records:     { label: 'Records',     color: 'var(--success)',   link: 'databases'   },
+  users:       { label: 'Users',       color: 'var(--warn)',      link: 'users'       },
+  apiKeys:     { label: 'API Keys',    color: 'var(--accent-h)',  link: 'apikeys'     },
+  webhooks:    { label: 'Webhooks',    color: 'var(--accent)',    link: 'webhooks'    },
+  credentials: { label: 'Credentials',color: 'var(--warn)',      link: 'credentials' },
 };
 
 const DASH_ACTION_META = {
-  create_db:          { icon: '🗄', label: 'Created database' },
-  delete_db:          { icon: '🗑', label: 'Deleted database' },
-  create_record:      { icon: '➕', label: 'Created record'   },
-  update_record:      { icon: '✏️', label: 'Updated record'   },
-  delete_record:      { icon: '🗑', label: 'Deleted record'   },
-  import_dataset:     { icon: '📥', label: 'Imported dataset' },
-  create_credential:  { icon: '🔐', label: 'Added credential' },
-  update_credential:  { icon: '✏️', label: 'Updated credential'},
-  delete_credential:  { icon: '🗑', label: 'Deleted credential'},
-  reveal_credential:  { icon: '👁', label: 'Revealed credential'},
-  create_user:        { icon: '👤', label: 'Created user'     },
-  delete_user:        { icon: '🗑', label: 'Deleted user'     },
-  create_key:         { icon: '🔑', label: 'Generated API key'},
-  delete_key:         { icon: '🗑', label: 'Revoked API key'  },
-  login:              { icon: '🔓', label: 'Logged in'        },
-  logout:             { icon: '🔒', label: 'Logged out'       },
+  create_db:          { label: 'Created database'   },
+  delete_db:          { label: 'Deleted database'   },
+  create_record:      { label: 'Created record'     },
+  update_record:      { label: 'Updated record'     },
+  delete_record:      { label: 'Deleted record'     },
+  import_dataset:     { label: 'Imported dataset'   },
+  create_credential:  { label: 'Added credential'   },
+  update_credential:  { label: 'Updated credential' },
+  delete_credential:  { label: 'Deleted credential' },
+  reveal_credential:  { label: 'Revealed credential'},
+  create_user:        { label: 'Created user'       },
+  delete_user:        { label: 'Deleted user'       },
+  create_key:         { label: 'Generated API key'  },
+  delete_key:         { label: 'Revoked API key'    },
+  login:              { label: 'Logged in'          },
+  logout:             { label: 'Logged out'         },
 };
 
 async function loadDashboard() {
@@ -216,7 +252,7 @@ function renderDashStats(stats, threatStats) {
       const val = stats[key];
       return `
         <button class="dash-stat-card" onclick="navigate('${meta.link}')" title="Go to ${meta.label}">
-          <div class="dash-stat-icon" style="color:${meta.color}">${meta.icon}</div>
+          <div class="dash-stat-icon" style="color:${meta.color}">${DASH_ICONS[key] || ''}</div>
           <div class="dash-stat-body">
             <div class="dash-stat-value">${val}</div>
             <div class="dash-stat-label">${meta.label}</div>
@@ -227,7 +263,7 @@ function renderDashStats(stats, threatStats) {
   if (isAdmin && threatStats) {
     cards.push(`
       <button class="dash-stat-card ${threatStats.blocked > 0 ? 'dash-stat-danger' : ''}" onclick="navigate('threats')" title="Go to Threat Monitor">
-        <div class="dash-stat-icon" style="color:var(--danger)">🛡</div>
+        <div class="dash-stat-icon" style="color:var(--danger)">${DASH_ICONS.threats}</div>
         <div class="dash-stat-body">
           <div class="dash-stat-value">${threatStats.total}</div>
           <div class="dash-stat-label">Threats <span class="dash-stat-sub">(${threatStats.blocked} blocked)</span></div>
@@ -262,10 +298,11 @@ function renderDashActivity(log) {
     return;
   }
   el.innerHTML = log.map(entry => {
-    const meta = DASH_ACTION_META[entry.action] || { icon: '·', label: entry.action };
+    const meta  = DASH_ACTION_META[entry.action] || { label: entry.action };
+    const color = _actColor(entry.action);
     return `
       <div class="dash-activity-row">
-        <span class="dash-act-icon">${meta.icon}</span>
+        <span class="dash-act-dot" style="background:${color}"></span>
         <div class="dash-act-body">
           <span class="dash-act-label">${meta.label}</span>
           ${entry.target ? `<span class="dash-act-target"> — ${esc(entry.target)}</span>` : ''}
