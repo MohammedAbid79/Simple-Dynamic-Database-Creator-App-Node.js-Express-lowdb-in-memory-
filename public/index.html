@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FluxDB</title>
-  <link rel="stylesheet" href="/style.css?v=5" />
+  <link rel="stylesheet" href="/style.css?v=6" />
 </head>
 <body>
   <!-- ── App Shell ── -->
@@ -59,6 +59,16 @@
             <path d="M11 14h6"/>
           </svg>
           <span class="nav-label">Query Engine</span>
+        </button>
+
+        <button class="nav-btn" id="nav-restapi" data-view="restapi" title="REST API">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 5h3m0 0v10m0-10h3"/>
+            <path d="M11 5h6"/>
+            <path d="M11 10h6"/>
+            <path d="M11 15h4"/>
+          </svg>
+          <span class="nav-label">REST API</span>
         </button>
 
         <button class="nav-btn" id="nav-apikeys" data-view="apikeys" title="API Keys" style="display:none">
@@ -166,6 +176,16 @@
         </div>
       </div>
 
+      <!-- REST API Generator View -->
+      <div id="view-restapi" class="view">
+        <div class="view-header">
+          <h2>REST API Generator</h2>
+          <button id="btn-refresh-restapi" class="btn btn-outline btn-sm">&#8635; Refresh</button>
+        </div>
+        <p class="apikey-hint">Every database gets its own REST API automatically. Authenticate with <code>X-API-Key: &lt;key&gt;</code> or <code>Authorization: Bearer &lt;key&gt;</code>.</p>
+        <div id="restapi-list"></div>
+      </div>
+
       <!-- Activity Log View (admin only) -->
       <div id="view-activity" class="view">
         <div class="view-header">
@@ -191,6 +211,6 @@
   <!-- Toast -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/app.js?v=4"></script>
+  <script src="/app.js?v=5"></script>
 </body>
 </html>

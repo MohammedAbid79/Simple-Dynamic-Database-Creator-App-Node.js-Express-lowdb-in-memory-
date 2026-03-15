@@ -80,6 +80,7 @@ document.querySelectorAll('.nav-btn[data-view]').forEach(btn => {
     if (btn.dataset.view === 'activity')  loadActivity();
     if (btn.dataset.view === 'apikeys')   loadApiKeys();
     if (btn.dataset.view === 'query')     loadQuerySchema();
+    if (btn.dataset.view === 'restapi')  loadRestApis();
   });
 });
 
@@ -930,4 +931,89 @@ function exportQueryCSV(columns, btn) {
     download: `query-results-${Date.now()}.csv`,
   });
   a.click(); URL.revokeObjectURL(a.href);
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   REST API GENERATOR VIEW
+   ════════════════════════════════════════════════════════════════════════════ */
+
+document.getElementById('btn-refresh-restapi').onclick = loadRestApis;
+
+async function loadRestApis() {
+  const wrap = document.getElementById('restapi-list');
+  wrap.innerHTML = '<p class="empty-state">Loading…</p>';
+  try {
+    const apis = await fetch('/api/v1').then(r => r.json());
+    if (!apis.length) {
+      wrap.innerHTML = '<div class="empty-state">No databases yet. Create a database first — its REST API will appear here automatically.</div>';
+      return;
+    }
+    wrap.innerHTML = apis.map(api => renderApiCard(api)).join('');
+  } catch (err) {
+    wrap.innerHTML = `<p class="empty-state" style="color:var(--danger)">${esc(err.message)}</p>`;
+  }
+}
+
+const METHOD_COLOR = { GET: '#2dce89', POST: '#6574ff', PUT: '#ffa94d', DELETE: '#f06565' };
+
+function renderApiCard(api) {
+  const baseUrl = window.location.origin + '/api/v1/' + api.slug;
+  const exampleBody = api.fields.length
+    ? JSON.stringify(Object.fromEntries(api.fields.map(f => [f.name, f.type === 'number' ? 0 : f.type === 'boolean' ? false : f.type === 'date' ? '2024-01-01' : 'value'])), null, 2)
+    : '{}';
+
+  const endpoints = [
+    { method: 'GET',    path: baseUrl,         desc: 'List records',         curl: `curl -H "X-API-Key: YOUR_KEY" \\\n  "${baseUrl}?limit=50&offset=0"` },
+    { method: 'GET',    path: baseUrl + '/:id', desc: 'Get record by ID',     curl: `curl -H "X-API-Key: YOUR_KEY" \\\n  "${baseUrl}/RECORD_ID"` },
+    { method: 'POST',   path: baseUrl,          desc: 'Create record',        curl: `curl -X POST \\\n  -H "X-API-Key: YOUR_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d '${exampleBody.replace(/'/g, "\\'")}' \\\n  "${baseUrl}"` },
+    { method: 'PUT',    path: baseUrl + '/:id', desc: 'Update record',        curl: `curl -X PUT \\\n  -H "X-API-Key: YOUR_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d '${exampleBody.replace(/'/g, "\\'")}' \\\n  "${baseUrl}/RECORD_ID"` },
+    { method: 'DELETE', path: baseUrl + '/:id', desc: 'Delete record',        curl: `curl -X DELETE \\\n  -H "X-API-Key: YOUR_KEY" \\\n  "${baseUrl}/RECORD_ID"` },
+  ];
+
+  const endpointRows = endpoints.map((ep, i) => `
+    <div class="api-endpoint-row">
+      <span class="method-badge method-${ep.method}">${ep.method}</span>
+      <code class="endpoint-path">${esc(ep.path)}</code>
+      <span class="endpoint-desc">${esc(ep.desc)}</span>
+      <div class="endpoint-actions">
+        <button class="btn btn-sm btn-ghost" onclick="copyText(${JSON.stringify(ep.path.replace('/:id',''))})" title="Copy base URL">&#128203;</button>
+        <button class="btn btn-sm btn-ghost" onclick="toggleCurl('curl-${api.slug}-${i}')" title="Show curl example">&lt;/&gt;</button>
+      </div>
+    </div>
+    <div class="curl-block hidden" id="curl-${api.slug}-${i}">
+      <button class="curl-copy-btn" onclick="copyText(${JSON.stringify(ep.curl)})" title="Copy">&#128203;</button>
+      <pre>${esc(ep.curl)}</pre>
+    </div>`).join('');
+
+  const fieldChips = api.fields.map(f =>
+    `<span class="field-chip">${esc(f.name)}${f.required ? '<span style="color:var(--danger);font-size:.7rem">*</span>' : ''}<span class="badge badge-${f.type}" style="margin-left:4px">${f.type}</span></span>`
+  ).join('');
+
+  return `
+    <div class="api-card">
+      <div class="api-card-header">
+        <div>
+          <div class="api-card-name">${esc(api.name)}</div>
+          <div class="api-card-slug">
+            <span class="api-slug-label">Base URL</span>
+            <code class="api-base-url">${esc(baseUrl)}</code>
+            <button class="btn btn-sm btn-ghost" onclick="copyText(${JSON.stringify(baseUrl)})" title="Copy base URL">&#128203;</button>
+          </div>
+        </div>
+        <div class="api-card-meta">
+          <span class="record-count-badge">${api.recordCount} record${api.recordCount !== 1 ? 's' : ''}</span>
+          <span class="record-count-badge">${api.fields.length} field${api.fields.length !== 1 ? 's' : ''}</span>
+        </div>
+      </div>
+      <div class="api-field-chips">${fieldChips}</div>
+      <div class="api-endpoints">${endpointRows}</div>
+    </div>`;
+}
+
+function toggleCurl(id) {
+  document.getElementById(id).classList.toggle('hidden');
+}
+
+function copyText(text) {
+  navigator.clipboard.writeText(text).then(() => toast('Copied!', 'success'));
 }

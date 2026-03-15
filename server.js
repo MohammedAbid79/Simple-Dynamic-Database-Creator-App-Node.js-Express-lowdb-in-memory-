@@ -600,6 +600,152 @@ app.post('/api/query', requireAuth, (req, res) => {
   }
 });
 
+// ─── Automatic REST API Generator (/api/v1) ───────────────────────────────────
+
+// Convert a database name to a URL-friendly slug
+function toSlug(name) {
+  return name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '');
+}
+
+// GET /api/v1 — list all auto-generated REST APIs
+app.get('/api/v1', requireAuth, (req, res) => {
+  const base = `${req.protocol}://${req.get('host')}`;
+  const dbs  = db.get('databases').value();
+  const apis = dbs.map(d => {
+    const slug = toSlug(d.name);
+    return {
+      name:    d.name,
+      slug,
+      baseUrl: `${base}/api/v1/${slug}`,
+      fields:  d.fields.map(f => ({ name: f.name, type: f.type, required: !!f.required })),
+      recordCount: db.get('records').filter({ databaseId: d.id }).value().length,
+      endpoints: [
+        { method: 'GET',    path: `/api/v1/${slug}`,     description: 'List records (supports ?limit=, ?offset=, ?_sort=, ?_order=, and field filters)' },
+        { method: 'GET',    path: `/api/v1/${slug}/:id`, description: 'Get single record by ID' },
+        { method: 'POST',   path: `/api/v1/${slug}`,     description: 'Create a new record' },
+        { method: 'PUT',    path: `/api/v1/${slug}/:id`, description: 'Update an existing record' },
+        { method: 'DELETE', path: `/api/v1/${slug}/:id`, description: 'Delete a record' },
+      ],
+    };
+  });
+  res.json(apis);
+});
+
+// Middleware: resolve slug param to an actual database object
+function resolveSlug(req, res, next) {
+  const dbs   = db.get('databases').value();
+  const found = dbs.find(d => toSlug(d.name) === req.params.slug);
+  if (!found) return res.status(404).json({ error: `No database found for slug "${req.params.slug}"` });
+  req._resolvedDb = found;
+  next();
+}
+
+// Flat record shape returned by all /api/v1 endpoints
+function flatRecord(r) {
+  return { id: r.id, ...r.data, _meta: { createdBy: r.createdBy, createdAt: r.createdAt, updatedAt: r.updatedAt } };
+}
+
+// GET /api/v1/:slug — list records with optional filtering & pagination
+app.get('/api/v1/:slug', requireAuth, resolveSlug, (req, res) => {
+  const database = req._resolvedDb;
+  let records    = db.get('records').filter({ databaseId: database.id }).value();
+
+  // Field-level filters: ?fieldName=value
+  const reserved = new Set(['limit', 'offset', '_sort', '_order']);
+  for (const [key, value] of Object.entries(req.query)) {
+    if (reserved.has(key)) continue;
+    if (database.fields.some(f => f.name === key)) {
+      records = records.filter(r => String(r.data[key] ?? '').toLowerCase() === String(value).toLowerCase());
+    }
+  }
+
+  // Sorting: ?_sort=field&_order=asc|desc
+  const { _sort, _order, limit, offset } = req.query;
+  if (_sort) {
+    const dir = (_order || 'asc').toLowerCase() === 'desc' ? -1 : 1;
+    records = [...records].sort((a, b) => {
+      const av = a.data[_sort] ?? a[_sort];
+      const bv = b.data[_sort] ?? b[_sort];
+      if (av == null) return dir;
+      if (bv == null) return -dir;
+      return av < bv ? -dir : av > bv ? dir : 0;
+    });
+  }
+
+  const total = records.length;
+  const off   = Math.max(0, parseInt(offset) || 0);
+  const lim   = Math.min(500, Math.max(1, parseInt(limit) || 100));
+  const page  = records.slice(off, off + lim);
+
+  res.json({ data: page.map(flatRecord), total, limit: lim, offset: off });
+});
+
+// GET /api/v1/:slug/:id — get single record
+app.get('/api/v1/:slug/:id', requireAuth, resolveSlug, (req, res) => {
+  const record = db.get('records')
+    .find({ id: req.params.id, databaseId: req._resolvedDb.id }).value();
+  if (!record) return res.status(404).json({ error: 'Record not found' });
+  res.json(flatRecord(record));
+});
+
+// POST /api/v1/:slug — create record
+app.post('/api/v1/:slug', requireMember, resolveSlug, (req, res) => {
+  const database  = req._resolvedDb;
+  const validated = validateRecordData(req.body, database.fields);
+  if (validated.error) return res.status(400).json({ error: validated.error });
+
+  const user      = getAuthUser(req);
+  const newRecord = {
+    id:         uuidv4(),
+    databaseId: database.id,
+    data:       validated.data,
+    createdBy:  user.username,
+    createdAt:  new Date().toISOString(),
+    updatedAt:  new Date().toISOString(),
+  };
+  db.get('records').push(newRecord).write();
+  logActivity('create_record', user.username, database.name, `Added record to "${database.name}" via REST API`);
+  res.status(201).json(flatRecord(newRecord));
+});
+
+// PUT /api/v1/:slug/:id — update record
+app.put('/api/v1/:slug/:id', requireMember, resolveSlug, (req, res) => {
+  const database = req._resolvedDb;
+  const record   = db.get('records')
+    .find({ id: req.params.id, databaseId: database.id }).value();
+  if (!record) return res.status(404).json({ error: 'Record not found' });
+
+  const user = getAuthUser(req);
+  if (user.role === 'member' && record.createdBy !== user.username) {
+    return res.status(403).json({ error: 'You can only edit your own records' });
+  }
+
+  const validated = validateRecordData(req.body, database.fields);
+  if (validated.error) return res.status(400).json({ error: validated.error });
+
+  db.get('records').find({ id: req.params.id })
+    .assign({ data: validated.data, updatedAt: new Date().toISOString() }).write();
+  logActivity('update_record', user.username, database.name, `Updated record in "${database.name}" via REST API`);
+  res.json(flatRecord(db.get('records').find({ id: req.params.id }).value()));
+});
+
+// DELETE /api/v1/:slug/:id — delete record
+app.delete('/api/v1/:slug/:id', requireMember, resolveSlug, (req, res) => {
+  const database = req._resolvedDb;
+  const record   = db.get('records')
+    .find({ id: req.params.id, databaseId: database.id }).value();
+  if (!record) return res.status(404).json({ error: 'Record not found' });
+
+  const user = getAuthUser(req);
+  if (user.role === 'member' && record.createdBy !== user.username) {
+    return res.status(403).json({ error: 'You can only delete your own records' });
+  }
+
+  db.get('records').remove({ id: req.params.id }).write();
+  logActivity('delete_record', user.username, database.name, `Deleted record from "${database.name}" via REST API`);
+  res.json({ message: 'Record deleted' });
+});
+
 // ─── Serve SPA ────────────────────────────────────────────────────────────────
 app.get('/login', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
