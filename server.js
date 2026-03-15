@@ -799,7 +799,189 @@ function validateRecordData(data, fields) {
 }
 
 // ─── Query engine ────────────────────────────────────────────────────────────
-// Returns table/field schema for the query editor sidebar
+
+// ── Mini fluent query language parser ────────────────────────────────────────
+// Supports: table.where(cond).select(cols).order(col,desc).limit(n).offset(n)
+//           .count().avg(col).sum(col).min(col).max(col).group(col)
+// Examples:
+//   users.where(age > 25).limit(10)
+//   orders.select(id, total).where(total > 100).order(total, desc).limit(20)
+//   products.group(category).count().avg(price)
+
+function extractUntilMatchingParen(str, start) {
+  // start points at the opening '('
+  let depth = 1;
+  let inStr  = null;
+  let i      = start + 1;
+  while (i < str.length) {
+    const ch = str[i];
+    if (inStr) {
+      if (ch === inStr && str[i - 1] !== '\\') inStr = null;
+    } else if (ch === "'" || ch === '"') {
+      inStr = ch;
+    } else if (ch === '(') {
+      depth++;
+    } else if (ch === ')') {
+      depth--;
+      if (depth === 0) return { content: str.slice(start + 1, i), nextPos: i + 1 };
+    }
+    i++;
+  }
+  throw new Error('Unmatched parenthesis in query');
+}
+
+function parseFluentQuery(input) {
+  let pos = 0;
+  const str = input.trim();
+
+  // Table name
+  const nameMatch = str.match(/^(\w+)/);
+  if (!nameMatch) throw new Error('Expected a table name at the start of the query');
+  const tableName = nameMatch[1];
+  pos = nameMatch[0].length;
+
+  let selectCols  = null;
+  const whereClauses = [];
+  let orderBy     = null;
+  let limitVal    = null;
+  let offsetVal   = null;
+  let groupBy     = null;
+  const aggregates = [];
+
+  while (pos < str.length) {
+    // Skip optional whitespace
+    while (pos < str.length && /\s/.test(str[pos])) pos++;
+    if (pos >= str.length) break;
+
+    if (str[pos] !== '.') throw new Error(`Unexpected character "${str[pos]}" at position ${pos}`);
+    pos++; // skip '.'
+
+    // Method name
+    const mMatch = str.slice(pos).match(/^([a-zA-Z]+)/);
+    if (!mMatch) throw new Error(`Expected method name at position ${pos}`);
+    const method = mMatch[1].toLowerCase();
+    pos += mMatch[1].length;
+
+    // Opening paren
+    while (pos < str.length && str[pos] === ' ') pos++;
+    if (str[pos] !== '(') throw new Error(`Expected "(" after method "${method}"`);
+    const { content: args, nextPos } = extractUntilMatchingParen(str, pos);
+    pos = nextPos;
+    const a = args.trim();
+
+    switch (method) {
+      case 'select':
+        selectCols = a || '*';
+        break;
+
+      case 'where':
+        if (!a) throw new Error('where() requires a condition');
+        whereClauses.push(a);
+        break;
+
+      case 'limit': {
+        const n = parseInt(a, 10);
+        if (isNaN(n) || n < 0) throw new Error(`limit() expects a non-negative integer, got: "${a}"`);
+        limitVal = n;
+        break;
+      }
+
+      case 'offset': {
+        const n = parseInt(a, 10);
+        if (isNaN(n) || n < 0) throw new Error(`offset() expects a non-negative integer, got: "${a}"`);
+        offsetVal = n;
+        break;
+      }
+
+      case 'order':
+      case 'orderby': {
+        // order(col) | order(col, desc) | order(col, asc)
+        const parts = a.split(/,\s*/);
+        const col   = parts[0].trim();
+        if (!col) throw new Error('order() requires a column name');
+        const dir   = (parts[1] || 'asc').trim().toUpperCase();
+        orderBy = `${col} ${dir === 'DESC' ? 'DESC' : 'ASC'}`;
+        break;
+      }
+
+      case 'group':
+      case 'groupby':
+        if (!a) throw new Error('group() requires a column name');
+        groupBy = a;
+        break;
+
+      case 'count': {
+        const alias = a || 'count';
+        aggregates.push(`COUNT(*) AS ${alias}`);
+        break;
+      }
+
+      case 'avg':
+        if (!a) throw new Error('avg() requires a column name');
+        aggregates.push(`AVG(${a}) AS avg_${a}`);
+        break;
+
+      case 'sum':
+        if (!a) throw new Error('sum() requires a column name');
+        aggregates.push(`SUM(${a}) AS sum_${a}`);
+        break;
+
+      case 'min':
+        if (!a) throw new Error('min() requires a column name');
+        aggregates.push(`MIN(${a}) AS min_${a}`);
+        break;
+
+      case 'max':
+        if (!a) throw new Error('max() requires a column name');
+        aggregates.push(`MAX(${a}) AS max_${a}`);
+        break;
+
+      default:
+        throw new Error(`Unknown method "${method}()". Supported: select, where, order, limit, offset, group, count, avg, sum, min, max`);
+    }
+  }
+
+  // Build SELECT list
+  let cols;
+  if (aggregates.length) {
+    const base = selectCols && selectCols !== '*' ? selectCols
+      : groupBy ? groupBy
+      : null;
+    cols = base ? `${base}, ${aggregates.join(', ')}` : aggregates.join(', ');
+  } else {
+    cols = selectCols || '*';
+  }
+
+  let sql = `SELECT ${cols} FROM ${tableName}`;
+  if (whereClauses.length) sql += ` WHERE ${whereClauses.join(' AND ')}`;
+  if (groupBy)             sql += ` GROUP BY ${groupBy}`;
+  if (orderBy)             sql += ` ORDER BY ${orderBy}`;
+  if (limitVal !== null)   sql += ` LIMIT ${limitVal}`;
+  if (offsetVal !== null)  sql += ` OFFSET ${offsetVal}`;
+
+  return sql;
+}
+
+// Detect syntax: starts with SELECT/WITH/EXPLAIN → SQL, otherwise → fluent
+function normalizeQuery(raw) {
+  const stripped = raw
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/--[^\n]*/g, '')
+    .trim();
+
+  if (/^(SELECT|WITH|EXPLAIN)\b/i.test(stripped)) {
+    return { sql: stripped, isFluent: false };
+  }
+  // Fluent: starts with a word (table name), optionally followed by .method(...)
+  if (/^\w+(\s*\.|$)/.test(stripped)) {
+    const sql = parseFluentQuery(stripped);
+    return { sql, isFluent: true, translatedSql: sql };
+  }
+  // Fall through to SQL (alasql will produce a meaningful error)
+  return { sql: stripped, isFluent: false };
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 app.get('/api/query/schema', requireAuth, (req, res) => {
   const result = db.get('databases').value().map(d => ({
     name: d.name,
@@ -819,17 +1001,22 @@ app.get('/api/query/schema', requireAuth, (req, res) => {
 let _queryLock = false;
 
 app.post('/api/query', requireAuth, (req, res) => {
-  const { sql } = req.body;
-  if (!sql || !sql.trim()) {
-    return res.status(400).json({ error: 'SQL query is required' });
+  const raw = req.body.sql || req.body.query || '';
+  if (!raw.trim()) {
+    return res.status(400).json({ error: 'A query is required (SQL or fluent syntax)' });
   }
 
-  // Strip comments then check the first keyword
-  const stripped = sql
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/--[^\n]*/g, '')
-    .trim();
-  if (!/^SELECT\b/i.test(stripped)) {
+  // Normalize: auto-detect and translate fluent → SQL if needed
+  let normalised;
+  try {
+    normalised = normalizeQuery(raw);
+  } catch (parseErr) {
+    return res.status(400).json({ error: parseErr.message });
+  }
+
+  const { sql, isFluent, translatedSql } = normalised;
+
+  if (!/^SELECT\b/i.test(sql)) {
     return res.status(400).json({ error: 'Only SELECT queries are supported' });
   }
 
@@ -862,7 +1049,7 @@ app.post('/api/query', requireAuth, (req, res) => {
     const elapsed = Date.now() - start;
 
     if (!Array.isArray(results)) {
-      return res.json({ columns: [], rows: [], rowCount: 0, elapsed });
+      return res.json({ columns: [], rows: [], rowCount: 0, elapsed, isFluent, translatedSql });
     }
 
     const MAX_ROWS = 2000;
@@ -870,7 +1057,7 @@ app.post('/api/query', requireAuth, (req, res) => {
     const rows      = truncated ? results.slice(0, MAX_ROWS) : results;
     const columns   = rows.length > 0 ? Object.keys(rows[0]) : [];
 
-    res.json({ columns, rows, rowCount: results.length, elapsed, truncated });
+    res.json({ columns, rows, rowCount: results.length, elapsed, truncated, isFluent, translatedSql });
 
   } catch (err) {
     res.status(400).json({ error: err.message });

@@ -931,11 +931,23 @@ select option { background: var(--surface2); }
   font-size: .65rem;
   font-weight: 800;
   letter-spacing: .1em;
+  border-radius: 6px;
+  padding: 3px 8px;
+}
+.query-badge-sql {
   background: var(--accent-dim);
   color: var(--accent-h);
   border: 1px solid rgba(101,116,255,.25);
-  border-radius: 6px;
-  padding: 3px 8px;
+}
+.query-badge-sep {
+  font-size: .72rem;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.query-badge-fluent {
+  background: rgba(45,206,137,.12);
+  color: var(--success);
+  border: 1px solid rgba(45,206,137,.25);
 }
 
 .query-layout {
@@ -958,15 +970,41 @@ select option { background: var(--surface2); }
 }
 
 .schema-panel-hd {
-  padding: 12px 14px 10px;
-  font-size: .72rem;
+  padding: 10px 12px 8px;
+  font-size: .7rem;
   font-weight: 700;
   letter-spacing: .06em;
   text-transform: uppercase;
   color: var(--text-muted);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
+.schema-insert-mode-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: .66rem;
+  color: var(--text-muted);
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+}
+.schema-mode-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: .65rem;
+  font-weight: 600;
+  padding: 1px 6px;
+  cursor: pointer;
+  transition: all var(--t) var(--ease);
+}
+.schema-mode-btn:hover  { border-color: var(--border-h); color: var(--text); }
+.schema-mode-btn.active { background: var(--accent-dim); border-color: rgba(101,116,255,.4); color: var(--accent-h); }
 
 .schema-panel-body {
   overflow-y: auto;
@@ -1193,6 +1231,33 @@ select option { background: var(--surface2); }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 .query-spinner svg { animation: spin .7s linear infinite; }
+
+/* ── Translated SQL banner (shown when fluent query was auto-converted) ── */
+.query-translated {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 10px 14px 0;
+  padding: 8px 12px;
+  background: rgba(45,206,137,.07);
+  border: 1px solid rgba(45,206,137,.2);
+  border-radius: 7px;
+  font-size: .78rem;
+}
+.qt-label {
+  color: var(--success);
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+  padding-top: 1px;
+}
+.qt-sql {
+  font-family: 'Courier New', Courier, monospace;
+  color: var(--text-muted);
+  font-size: .78rem;
+  word-break: break-all;
+  line-height: 1.5;
+}
 
 /* ── REST API Generator ──────────────────────────────────────────────────── */
 #restapi-list {

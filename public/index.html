@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FluxDB</title>
   <link rel="stylesheet" href="/fonts/inter.css" />
-  <link rel="stylesheet" href="/style.css?v=15" />
+  <link rel="stylesheet" href="/style.css?v=16" />
 </head>
 <body>
   <!-- ── App Shell ── -->
@@ -247,12 +247,23 @@
       <div id="view-query" class="view">
         <div class="view-header">
           <h2>Query Engine</h2>
-          <span class="query-badge">SQL</span>
+          <div style="display:flex;gap:6px;align-items:center">
+            <span class="query-badge query-badge-sql">SQL</span>
+            <span class="query-badge-sep">+</span>
+            <span class="query-badge query-badge-fluent">Fluent</span>
+          </div>
         </div>
         <div class="query-layout">
           <!-- Schema sidebar -->
           <div class="schema-panel" id="query-schema">
-            <div class="schema-panel-hd">Tables</div>
+            <div class="schema-panel-hd">
+              <span>Tables</span>
+              <span class="schema-insert-mode-wrap">
+                Insert as
+                <button class="schema-mode-btn active" id="schema-mode-sql"   title="Click table to insert SQL">SQL</button>
+                <button class="schema-mode-btn"        id="schema-mode-fluent" title="Click table to insert fluent query">Fluent</button>
+              </span>
+            </div>
             <div class="schema-panel-body" id="schema-body">
               <div class="schema-empty">No tables yet.<br>Create a database first.</div>
             </div>
@@ -261,7 +272,7 @@
           <div class="query-main">
             <div class="query-editor-wrap">
               <textarea id="query-input" class="query-editor" spellcheck="false"
-                placeholder="-- Write SQL against your FluxDB tables&#10;SELECT * FROM TableName WHERE field = 'value' ORDER BY field DESC LIMIT 50&#10;&#10;-- Aggregates&#10;SELECT createdBy, COUNT(*) AS cnt, AVG(price) AS avg_price&#10;FROM TableName GROUP BY createdBy"></textarea>
+                placeholder="-- SQL syntax&#10;SELECT name, email FROM users WHERE age > 25 ORDER BY name LIMIT 50&#10;&#10;-- Fluent syntax&#10;users.where(age > 25).select(name, email).order(name).limit(50)&#10;&#10;-- Aggregates (fluent)&#10;orders.where(total > 100).group(status).count().sum(total)&#10;&#10;-- Aggregates (SQL)&#10;SELECT status, COUNT(*) AS cnt, SUM(total) AS sum_total&#10;FROM orders WHERE total > 100 GROUP BY status"></textarea>
               <div class="query-toolbar">
                 <button id="btn-run-query" class="btn btn-primary btn-sm">
                   <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor" stroke="none" aria-hidden="true">
@@ -348,6 +359,6 @@
   <!-- Toast -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/app.js?v=13"></script>
+  <script src="/app.js?v=14"></script>
 </body>
 </html>

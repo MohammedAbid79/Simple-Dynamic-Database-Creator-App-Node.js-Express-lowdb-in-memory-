@@ -981,6 +981,19 @@ function fmtDate(iso) {
    ════════════════════════════════════════════════════════════════════════════ */
 
 // ── Schema sidebar ────────────────────────────────────────────────────────────
+// ── Schema insert-mode toggle (SQL vs Fluent) ─────────────────────────────────
+let _schemaInsertMode = 'sql'; // 'sql' | 'fluent'
+document.getElementById('schema-mode-sql').addEventListener('click', () => {
+  _schemaInsertMode = 'sql';
+  document.getElementById('schema-mode-sql').classList.add('active');
+  document.getElementById('schema-mode-fluent').classList.remove('active');
+});
+document.getElementById('schema-mode-fluent').addEventListener('click', () => {
+  _schemaInsertMode = 'fluent';
+  document.getElementById('schema-mode-fluent').classList.add('active');
+  document.getElementById('schema-mode-sql').classList.remove('active');
+});
+
 async function loadQuerySchema() {
   const body = document.getElementById('schema-body');
   body.innerHTML = '<div class="schema-empty">Loading…</div>';
@@ -992,7 +1005,7 @@ async function loadQuerySchema() {
     }
     body.innerHTML = tables.map(t => `
       <div class="schema-table">
-        <button class="schema-table-btn" onclick="insertTableQuery(${JSON.stringify(t.name)})" title="Click to generate SELECT query">
+        <button class="schema-table-btn" onclick="insertTableQuery(${JSON.stringify(t.name)})" title="Click to generate a query">
           <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <ellipse cx="10" cy="5.5" rx="6.5" ry="2.3"/>
             <path d="M3.5 5.5v4c0 1.27 2.91 2.3 6.5 2.3s6.5-1.03 6.5-2.3v-4"/>
@@ -1016,8 +1029,12 @@ async function loadQuerySchema() {
 
 function insertTableQuery(name) {
   const el = document.getElementById('query-input');
-  const q = /\s/.test(name) ? `\`${name}\`` : name;
-  el.value = `SELECT *\nFROM ${q}\nLIMIT 100`;
+  const q  = /\s/.test(name) ? `\`${name}\`` : name;
+  if (_schemaInsertMode === 'fluent') {
+    el.value = `${q}.limit(100)`;
+  } else {
+    el.value = `SELECT *\nFROM ${q}\nLIMIT 100`;
+  }
   el.focus();
 }
 
@@ -1065,9 +1082,13 @@ async function runQuery() {
   }
 }
 
-function renderQueryResults(el, { columns, rows, rowCount, elapsed, truncated }) {
+function renderQueryResults(el, { columns, rows, rowCount, elapsed, truncated, isFluent, translatedSql }) {
+  const translatedBanner = (isFluent && translatedSql)
+    ? `<div class="query-translated"><span class="qt-label">Translated to SQL</span><code class="qt-sql">${esc(translatedSql)}</code></div>`
+    : '';
+
   if (!columns.length) {
-    el.innerHTML = '<div class="query-empty-state">Query returned no results.</div>';
+    el.innerHTML = translatedBanner + '<div class="query-empty-state">Query returned no results.</div>';
     return;
   }
 
@@ -1089,6 +1110,7 @@ function renderQueryResults(el, { columns, rows, rowCount, elapsed, truncated })
   ).join('')}</tbody>`;
 
   el.innerHTML = `
+    ${translatedBanner}
     <div class="query-results-meta">
       <span class="qm-rows">↳ ${rowCount.toLocaleString()} row${rowCount !== 1 ? 's' : ''}</span>
       <span class="qm-time">${elapsed} ms</span>
