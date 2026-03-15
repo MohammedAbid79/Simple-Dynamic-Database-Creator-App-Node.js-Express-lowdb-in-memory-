@@ -120,6 +120,7 @@ body {
 /* ── Sidebar ──────────────────────────────────────────────────────────────── */
 #sidebar {
   width: var(--sidebar-w);
+  height: 100vh;
   background: var(--surface);
   border-right: 1px solid var(--border);
   display: flex;
@@ -180,7 +181,20 @@ body {
 .hamburger-btn:hover { color: var(--text); background: var(--surface2); }
 .hamburger-btn svg { width: 18px; height: 18px; }
 
-nav { flex: 1; padding: 10px 8px; overflow: hidden; }
+nav {
+  flex: 1;
+  padding: 10px 8px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;           /* lets flexbox shrink it so footer is never pushed out */
+}
+
+/* Thin custom scrollbar inside nav */
+nav::-webkit-scrollbar       { width: 4px; }
+nav::-webkit-scrollbar-track { background: transparent; }
+nav::-webkit-scrollbar-thumb { background: var(--border-h); border-radius: 4px; }
+nav::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+nav { scrollbar-width: thin; scrollbar-color: var(--border-h) transparent; }
 
 .nav-btn {
   width: 100%;
@@ -230,6 +244,50 @@ nav { flex: 1; padding: 10px 8px; overflow: hidden; }
 #sidebar.collapsed .user-info { display: none; }
 #sidebar.collapsed .logout-btn-inner .nav-label { display: none; }
 #sidebar.collapsed .logout-btn-inner { justify-content: center; padding: 8px; }
+
+/* ── Responsive: short viewport — compact nav buttons ────────────────────── */
+@media (max-height: 680px) {
+  .nav-btn { padding: 7px 12px; font-size: .84rem; margin-bottom: 1px; }
+  .sidebar-header { padding: 10px 14px; }
+  .sidebar-footer { padding: 8px 12px; gap: 7px; }
+}
+
+/* ── Responsive: narrow viewport — auto-collapse sidebar ─────────────────── */
+@media (max-width: 640px) {
+  :root { --sidebar-w: 60px; }
+
+  /* Collapsed appearance by default on mobile */
+  #sidebar { width: 60px; }
+  #sidebar .sidebar-header { justify-content: center; padding: 14px 0; }
+  #sidebar .brand { display: none; }
+  #sidebar .nav-btn { justify-content: center; padding: 11px 0; gap: 0; }
+  #sidebar .nav-label { display: none; }
+  #sidebar .sidebar-footer { align-items: center; padding: 12px 0; }
+  #sidebar .user-profile { flex-direction: column; gap: 0; }
+  #sidebar .user-info { display: none; }
+  #sidebar .logout-btn-inner .nav-label { display: none; }
+  #sidebar .logout-btn-inner { justify-content: center; padding: 8px; }
+
+  /* But if the user explicitly expands it, show full sidebar as overlay */
+  #sidebar:not(.collapsed) {
+    position: fixed;
+    top: 0; left: 0;
+    height: 100vh;
+    width: var(--sidebar-w, 224px) !important;
+    width: 224px !important;
+    z-index: 200;
+    box-shadow: 4px 0 24px rgba(0,0,0,.5);
+  }
+  #sidebar:not(.collapsed) .brand { display: flex; }
+  #sidebar:not(.collapsed) .nav-btn { justify-content: flex-start; padding: 9px 12px; gap: 10px; }
+  #sidebar:not(.collapsed) .nav-label { display: block; }
+  #sidebar:not(.collapsed) .sidebar-footer { align-items: stretch; padding: 12px; }
+  #sidebar:not(.collapsed) .user-profile { flex-direction: row; gap: 10px; }
+  #sidebar:not(.collapsed) .user-info { display: flex; }
+  #sidebar:not(.collapsed) .logout-btn-inner { justify-content: flex-start; padding: 8px 12px; }
+  #sidebar:not(.collapsed) .logout-btn-inner .nav-label { display: block; }
+  #sidebar:not(.collapsed) .sidebar-header { justify-content: space-between; padding: 14px 14px; }
+}
 
 /* ── Sidebar footer & user profile ───────────────────────────────────────── */
 .sidebar-footer {
