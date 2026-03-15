@@ -236,6 +236,7 @@ const DASH_ACTION_META = {
   create_user:        { label: 'Created user'       },
   delete_user:        { label: 'Deleted user'       },
   create_key:         { label: 'Generated API key'  },
+  update_key:         { label: 'Updated key role'   },
   delete_key:         { label: 'Revoked API key'    },
   login:              { label: 'Logged in'          },
   logout:             { label: 'Logged out'         },
@@ -888,6 +889,26 @@ document.getElementById('btn-refresh-activity').onclick = loadActivity;
 /* ════════════════════════════════════════════════════════════════════════════
    API KEYS VIEW (all users)
    ════════════════════════════════════════════════════════════════════════════ */
+// ── Key role helpers ──────────────────────────────────────────────────────────
+const KEY_ROLE_META = {
+  admin:  { label: 'Admin',  cls: 'key-role-admin',  desc: 'Full control — manage databases, records, users, keys' },
+  editor: { label: 'Editor', cls: 'key-role-editor', desc: 'Read + Write — create, update and delete databases and records' },
+  viewer: { label: 'Viewer', cls: 'key-role-viewer', desc: 'Read Only — can only read databases and records (no writes)' },
+};
+
+function keyRoleBadge(role) {
+  const m = KEY_ROLE_META[role] || KEY_ROLE_META.editor;
+  return `<span class="key-role-badge ${m.cls}" title="${m.desc}">${m.label}</span>`;
+}
+
+// Role options available to the current user (can't create keys above own level)
+function availableKeyRoles() {
+  const role = currentUser.role;
+  if (role === 'admin')  return ['admin', 'editor', 'viewer'];
+  if (role === 'member') return ['editor', 'viewer'];
+  return ['viewer'];
+}
+
 async function loadApiKeys() {
   const wrap = document.getElementById('apikey-list');
   wrap.innerHTML = `<p class="empty-state">Loading…</p>`;
@@ -898,18 +919,30 @@ async function loadApiKeys() {
       return;
     }
     wrap.innerHTML = `<table>
-      <thead><tr><th>Name</th><th>Key Preview</th><th>Created</th><th>Last Used</th><th>Actions</th></tr></thead>
-      <tbody>${keys.map(k => `<tr>
-        <td><strong>${esc(k.name)}</strong></td>
-        <td><code class="key-preview">${esc(k.keyPreview)}</code></td>
-        <td>${fmtDate(k.createdAt)}</td>
-        <td>${k.lastUsed ? fmtDate(k.lastUsed) : '<span style="color:var(--text-muted)">Never</span>'}</td>
-        <td>
-          <div class="actions-cell">
-            <button class="btn-icon del" onclick="revokeApiKey('${k.id}','${esc(k.name)}')">&#128465; Revoke</button>
-          </div>
-        </td>
-      </tr>`).join('')}</tbody>
+      <thead><tr>
+        <th>Name</th>
+        <th>Role</th>
+        <th>Key Preview</th>
+        <th>Created</th>
+        <th>Last Used</th>
+        <th>Actions</th>
+      </tr></thead>
+      <tbody>${keys.map(k => {
+        const role = k.role || 'editor';
+        return `<tr>
+          <td><strong>${esc(k.name)}</strong></td>
+          <td>${keyRoleBadge(role)}</td>
+          <td><code class="key-preview">${esc(k.keyPreview)}</code></td>
+          <td>${fmtDate(k.createdAt)}</td>
+          <td>${k.lastUsed ? fmtDate(k.lastUsed) : '<span style="color:var(--text-muted)">Never</span>'}</td>
+          <td>
+            <div class="actions-cell">
+              <button class="btn btn-ghost btn-xs" onclick="changeKeyRole('${k.id}','${esc(k.name)}','${role}')">&#9998; Role</button>
+              <button class="btn-icon del" onclick="revokeApiKey('${k.id}','${esc(k.name)}')">&#128465; Revoke</button>
+            </div>
+          </td>
+        </tr>`;
+      }).join('')}</tbody>
     </table>`;
   } catch (err) {
     wrap.innerHTML = `<p class="empty-state" style="color:var(--danger)">${esc(err.message)}</p>`;
@@ -917,18 +950,37 @@ async function loadApiKeys() {
 }
 
 document.getElementById('btn-create-key').onclick = () => {
+  const roles   = availableKeyRoles();
+  const options = roles.map(r => {
+    const m = KEY_ROLE_META[r];
+    return `<option value="${r}"${r === 'editor' ? ' selected' : ''}>${m.label} — ${m.desc}</option>`;
+  }).join('');
+
   openModal('Generate API Key', `
-    <label>Key Name <span style="color:var(--text-muted);font-weight:400">(e.g. "My Script", "CI Pipeline")</span></label>
-    <input id="key-name-input" type="text" placeholder="e.g. Production Script" maxlength="60" />`,
+    <label>Key Name <span style="color:var(--text-muted);font-weight:400">(e.g. "CI Pipeline", "Read-only Monitor")</span></label>
+    <input id="key-name-input" type="text" placeholder="e.g. Production Script" maxlength="60" />
+
+    <label style="margin-top:14px">
+      Role
+      <span style="color:var(--text-muted);font-weight:400;font-size:.8rem"> — controls what this key can do</span>
+    </label>
+    <select id="key-role-input" class="input" onchange="updateKeyRoleDesc()">
+      ${options}
+    </select>
+    <div id="key-role-desc-box" class="key-role-desc-box"></div>`,
     async () => {
       const name = document.getElementById('key-name-input').value.trim();
+      const role = document.getElementById('key-role-input').value;
       if (!name) return toast('Key name is required', 'error');
       try {
-        const result = await api('POST', '/keys', { name });
+        const result = await api('POST', '/keys', { name, role });
         closeModal();
-        // Show the key exactly once — user must copy it now
         openModal('Your New API Key', `
-          <p style="color:var(--text-muted);font-size:.85rem;margin-bottom:12px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+            ${keyRoleBadge(result.role)}
+            <span style="color:var(--text-muted);font-size:.84rem">${KEY_ROLE_META[result.role]?.desc || ''}</span>
+          </div>
+          <p style="color:var(--text-muted);font-size:.84rem;margin-bottom:12px">
             Copy this key now. It will <strong style="color:var(--danger)">not be shown again</strong>.
           </p>
           <div class="key-reveal-box">
@@ -942,11 +994,61 @@ document.getElementById('btn-create-key').onclick = () => {
         toast('API key created!', 'success');
       } catch (err) { toast(err.message, 'error'); }
     }, 'Generate');
+
+  // Initialise description box
+  setTimeout(updateKeyRoleDesc, 0);
 };
+
+function updateKeyRoleDesc() {
+  const sel = document.getElementById('key-role-input');
+  const box = document.getElementById('key-role-desc-box');
+  if (!sel || !box) return;
+  const m = KEY_ROLE_META[sel.value] || KEY_ROLE_META.editor;
+  box.className = `key-role-desc-box key-role-desc-${sel.value}`;
+  box.innerHTML = `<span class="key-role-badge ${m.cls}" style="margin-right:6px">${m.label}</span>${m.desc}`;
+}
 
 function copyApiKey() {
   const val = document.getElementById('new-key-value').textContent;
   navigator.clipboard.writeText(val).then(() => toast('Key copied to clipboard!', 'success'));
+}
+
+function changeKeyRole(id, name, currentRole) {
+  const roles   = availableKeyRoles();
+  const options = roles.map(r => {
+    const m = KEY_ROLE_META[r];
+    return `<option value="${r}"${r === currentRole ? ' selected' : ''}>${m.label} — ${m.desc}</option>`;
+  }).join('');
+
+  openModal('Change Key Role', `
+    <p style="margin-bottom:12px">Update role for key <strong>${esc(name)}</strong>:</p>
+    <select id="change-role-input" class="input" onchange="updateChangeRoleDesc()">
+      ${options}
+    </select>
+    <div id="change-role-desc-box" class="key-role-desc-box"></div>
+    <p style="color:var(--text-muted);font-size:.8rem;margin-top:10px">
+      Active requests using this key will immediately use the new permissions.
+    </p>`,
+    async () => {
+      const role = document.getElementById('change-role-input').value;
+      try {
+        await api('PATCH', `/keys/${id}`, { role });
+        closeModal();
+        toast(`Key role updated to ${role}`, 'success');
+        loadApiKeys();
+      } catch (err) { toast(err.message, 'error'); }
+    }, 'Update Role');
+
+  setTimeout(updateChangeRoleDesc, 0);
+}
+
+function updateChangeRoleDesc() {
+  const sel = document.getElementById('change-role-input');
+  const box = document.getElementById('change-role-desc-box');
+  if (!sel || !box) return;
+  const m = KEY_ROLE_META[sel.value] || KEY_ROLE_META.editor;
+  box.className = `key-role-desc-box key-role-desc-${sel.value}`;
+  box.innerHTML = `<span class="key-role-badge ${m.cls}" style="margin-right:6px">${m.label}</span>${m.desc}`;
 }
 
 function revokeApiKey(id, name) {

@@ -2152,3 +2152,50 @@ select option { background: var(--surface2); }
   font-size: .72rem;
   line-height: 1.5;
 }
+
+/* ── API Key RBAC role badges ─────────────────────────────────────────────── */
+.key-role-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.key-role-admin  {
+  background: rgba(240,101,101,.13);
+  color: var(--danger);
+  border: 1px solid rgba(240,101,101,.28);
+}
+.key-role-editor {
+  background: rgba(101,116,255,.13);
+  color: var(--accent-h);
+  border: 1px solid rgba(101,116,255,.28);
+}
+.key-role-viewer {
+  background: rgba(45,206,137,.11);
+  color: var(--success);
+  border: 1px solid rgba(45,206,137,.25);
+}
+
+/* Role description box shown below the role <select> in the create/edit modal */
+.key-role-desc-box {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 7px;
+  font-size: .8rem;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-height: 34px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  background: var(--surface2);
+  transition: background var(--t) var(--ease), border-color var(--t) var(--ease);
+}
+.key-role-desc-admin  { background: rgba(240,101,101,.07); border-color: rgba(240,101,101,.22); color: var(--text); }
+.key-role-desc-editor { background: rgba(101,116,255,.07); border-color: rgba(101,116,255,.22); color: var(--text); }
+.key-role-desc-viewer { background: rgba(45,206,137,.06);  border-color: rgba(45,206,137,.2);  color: var(--text); }

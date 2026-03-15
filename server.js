@@ -349,6 +349,16 @@ app.use(session({
 app.use('/api', apiLimiter);
 app.use('/api', threatDetection);
 
+// ─── API key RBAC constants ───────────────────────────────────────────────────
+// Three key roles that map onto existing session roles:
+//   admin  → full control  (session: admin)
+//   editor → read + write  (session: member)
+//   viewer → read only     (session: guest)
+const KEY_ROLES    = ['admin', 'editor', 'viewer'];
+const KEY_ROLE_MAP = { admin: 'admin', editor: 'member', viewer: 'guest' };
+// Numeric level used for privilege-cap enforcement
+const ROLE_LEVEL   = { admin: 3, member: 2, guest: 1 };
+
 // ─── Auth middleware ──────────────────────────────────────────────────────────
 function requireAuth(req, res, next) {
   // 1. Session-based auth (web UI)
@@ -370,7 +380,15 @@ function requireAuth(req, res, next) {
   db.get('apiKeys').find({ id: apiKey.id })
     .assign({ lastUsed: new Date().toISOString() }).write();
 
-  req._apiUser = { id: user.id, username: user.username, role: user.role };
+  // Determine effective role: map key role → session role, then cap by user's own level
+  // (a member can never wield an admin key even if one was manually inserted)
+  const keyRoleRaw    = apiKey.role || 'editor';          // default for old keys
+  const mappedRole    = KEY_ROLE_MAP[keyRoleRaw] || 'guest';
+  const userLevel     = ROLE_LEVEL[user.role]    || 1;
+  const keyLevel      = ROLE_LEVEL[mappedRole]   || 1;
+  const effectiveRole = keyLevel <= userLevel ? mappedRole : user.role;
+
+  req._apiUser = { id: user.id, username: user.username, role: effectiveRole, keyRole: keyRoleRaw };
   next();
 }
 
@@ -382,11 +400,11 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-// admin or member — guests are blocked
+// admin or member — guests/viewers are blocked
 function requireMember(req, res, next) {
   const user = getAuthUser(req);
   if (!user || user.role === 'guest') {
-    return res.status(403).json({ error: 'Account required' });
+    return res.status(403).json({ error: 'Write access required (editor or admin key)' });
   }
   next();
 }
@@ -486,6 +504,7 @@ app.get('/api/keys', requireMember, (req, res) => {
     .map(k => ({
       id:         k.id,
       name:       k.name,
+      role:       k.role || 'editor',   // backward-compat default
       keyPreview: k.key.slice(0, 14) + '…',
       createdAt:  k.createdAt,
       lastUsed:   k.lastUsed,
@@ -496,27 +515,75 @@ app.get('/api/keys', requireMember, (req, res) => {
 
 app.post('/api/keys', requireMember, (req, res) => {
   const user = getAuthUser(req);
-  const { name } = req.body;
+  const { name, role } = req.body;
   if (!name || !name.trim()) {
     return res.status(400).json({ error: 'Key name is required' });
   }
-  const existing = db.get('apiKeys').filter({ userId: user.id }).value();
-  if (existing.length >= 5) {
-    return res.status(400).json({ error: 'Maximum 5 API keys per user' });
+
+  // Validate role — default to editor
+  const requestedRole = KEY_ROLES.includes(role) ? role : 'editor';
+
+  // Privilege-cap: cannot create a key with more power than your own session role
+  const mappedRole = KEY_ROLE_MAP[requestedRole];
+  const userLevel  = ROLE_LEVEL[user.role]  || 1;
+  const keyLevel   = ROLE_LEVEL[mappedRole] || 1;
+  if (keyLevel > userLevel) {
+    return res.status(403).json({
+      error: `Your account role (${user.role}) cannot create a ${requestedRole} key`,
+    });
   }
+
+  const existing = db.get('apiKeys').filter({ userId: user.id }).value();
+  if (existing.length >= 10) {
+    return res.status(400).json({ error: 'Maximum 10 API keys per user' });
+  }
+
   const key    = 'dyndb_' + crypto.randomBytes(24).toString('hex');
   const newKey = {
     id:        uuidv4(),
     key,
     name:      name.trim(),
+    role:      requestedRole,
     userId:    user.id,
     createdAt: new Date().toISOString(),
     lastUsed:  null,
   };
   db.get('apiKeys').push(newKey).write();
-  logActivity('create_key', user.username, newKey.name, `Created API key "${newKey.name}"`);
-  // Return full key only on creation — it is never shown again
-  res.status(201).json({ id: newKey.id, name: newKey.name, key, createdAt: newKey.createdAt });
+  logActivity('create_key', user.username, newKey.name,
+    `Created ${requestedRole} API key "${newKey.name}"`);
+  res.status(201).json({
+    id: newKey.id, name: newKey.name, key, role: requestedRole, createdAt: newKey.createdAt,
+  });
+});
+
+// PATCH /api/keys/:id — update role only (admin or key owner)
+app.patch('/api/keys/:id', requireMember, (req, res) => {
+  const user   = getAuthUser(req);
+  const apiKey = db.get('apiKeys').find({ id: req.params.id }).value();
+  if (!apiKey) return res.status(404).json({ error: 'API key not found' });
+  if (apiKey.userId !== user.id && user.role !== 'admin') {
+    return res.status(403).json({ error: "Cannot modify another user's API key" });
+  }
+
+  const { role } = req.body;
+  if (!KEY_ROLES.includes(role)) {
+    return res.status(400).json({ error: `role must be one of: ${KEY_ROLES.join(', ')}` });
+  }
+
+  // Privilege cap
+  const mappedRole = KEY_ROLE_MAP[role];
+  const userLevel  = ROLE_LEVEL[user.role]  || 1;
+  const keyLevel   = ROLE_LEVEL[mappedRole] || 1;
+  if (keyLevel > userLevel) {
+    return res.status(403).json({
+      error: `Your account role (${user.role}) cannot set a ${role} key`,
+    });
+  }
+
+  db.get('apiKeys').find({ id: apiKey.id }).assign({ role }).write();
+  logActivity('update_key', user.username, apiKey.name,
+    `Changed key "${apiKey.name}" role to ${role}`);
+  res.json({ id: apiKey.id, name: apiKey.name, role });
 });
 
 app.delete('/api/keys/:id', requireMember, (req, res) => {
@@ -527,7 +594,8 @@ app.delete('/api/keys/:id', requireMember, (req, res) => {
     return res.status(403).json({ error: "Cannot revoke another user's API key" });
   }
   db.get('apiKeys').remove({ id: req.params.id }).write();
-  logActivity('delete_key', user.username, apiKey.name, `Revoked API key "${apiKey.name}"`);
+  logActivity('delete_key', user.username, apiKey.name,
+    `Revoked ${apiKey.role || 'editor'} key "${apiKey.name}"`);
   res.json({ message: 'API key revoked' });
 });
 
