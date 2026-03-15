@@ -202,6 +202,15 @@ function _actColor(action) {
   return DASH_ACT_COLOR.default;
 }
 
+// Pre-resolved icon background tints (avoid relying on CSS color-mix)
+const DASH_ICON_BG = {
+  'var(--accent)':   'rgba(101,116,255,.15)',
+  'var(--accent-h)': 'rgba(125,138,255,.15)',
+  'var(--success)':  'rgba(45,206,137,.15)',
+  'var(--warn)':     'rgba(255,169,77,.15)',
+  'var(--danger)':   'rgba(240,101,101,.15)',
+};
+
 const DASH_STAT_META = {
   databases:   { label: 'Databases',   color: 'var(--accent)',    link: 'databases'   },
   records:     { label: 'Records',     color: 'var(--success)',   link: 'databases'   },
@@ -249,25 +258,25 @@ function renderDashStats(stats, threatStats) {
   const cards = Object.entries(DASH_STAT_META)
     .filter(([key]) => stats[key] !== null && stats[key] !== undefined)
     .map(([key, meta]) => {
-      const val = stats[key];
+      const val    = stats[key];
+      const iconBg = DASH_ICON_BG[meta.color] || 'rgba(255,255,255,.07)';
       return `
         <button class="dash-stat-card" onclick="navigate('${meta.link}')" title="Go to ${meta.label}">
-          <div class="dash-stat-icon" style="color:${meta.color}">${DASH_ICONS[key] || ''}</div>
-          <div class="dash-stat-body">
-            <div class="dash-stat-value">${val}</div>
-            <div class="dash-stat-label">${meta.label}</div>
-          </div>
+          <div class="dash-stat-icon" style="color:${meta.color};background:${iconBg}">${DASH_ICONS[key] || ''}</div>
+          <div class="dash-stat-value">${val}</div>
+          <div class="dash-stat-label">${meta.label}</div>
         </button>`;
     });
 
   if (isAdmin && threatStats) {
+    const dangerBg = DASH_ICON_BG['var(--danger)'];
+    const extra    = threatStats.blocked > 0 ? ' dash-stat-danger' : '';
     cards.push(`
-      <button class="dash-stat-card ${threatStats.blocked > 0 ? 'dash-stat-danger' : ''}" onclick="navigate('threats')" title="Go to Threat Monitor">
-        <div class="dash-stat-icon" style="color:var(--danger)">${DASH_ICONS.threats}</div>
-        <div class="dash-stat-body">
-          <div class="dash-stat-value">${threatStats.total}</div>
-          <div class="dash-stat-label">Threats <span class="dash-stat-sub">(${threatStats.blocked} blocked)</span></div>
-        </div>
+      <button class="dash-stat-card${extra}" onclick="navigate('threats')" title="Go to Threat Monitor">
+        <div class="dash-stat-icon" style="color:var(--danger);background:${dangerBg}">${DASH_ICONS.threats}</div>
+        <div class="dash-stat-value">${threatStats.total}</div>
+        <div class="dash-stat-label">Threats</div>
+        ${threatStats.blocked > 0 ? `<div class="dash-stat-sub-blocked">${threatStats.blocked} blocked</div>` : ''}
       </button>`);
   }
 
