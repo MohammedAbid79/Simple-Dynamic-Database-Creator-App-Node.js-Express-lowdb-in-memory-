@@ -26,6 +26,7 @@ db.defaults({
   records:     [],   // { id, databaseId, data: {}, createdBy, createdAt, updatedAt }
   activityLog: [],   // { id, action, user, target, detail, timestamp }
   apiKeys:     [],   // { id, key, name, userId, createdAt, lastUsed }
+  webhooks:    [],   // { id, event, url, name, secret, createdBy, createdAt, active }
 }).write();
 
 // ─── Activity log helper ──────────────────────────────────────────────────────
@@ -79,6 +80,64 @@ function createRateLimiter(max, windowMs) {
 // 10 req/min for login (brute-force protection), 120 req/min for all other API
 const loginLimiter = createRateLimiter(10,  60 * 1000);
 const apiLimiter   = createRateLimiter(120, 60 * 1000);
+
+// ─── Webhook Event System ────────────────────────────────────────────────────
+const WEBHOOK_EVENTS = [
+  'record.created', 'record.updated', 'record.deleted',
+  'database.created', 'database.deleted',
+];
+
+const _deliveryLog = new Map();   // webhookId → [{ event, statusCode, duration, success, error, timestamp }]
+
+function isValidWebhookUrl(url) {
+  try { const u = new URL(url); return u.protocol === 'http:' || u.protocol === 'https:'; }
+  catch (_) { return false; }
+}
+
+async function deliverWebhook(hook, event, payload) {
+  const deliveryId = uuidv4();
+  const body = JSON.stringify({ event, deliveryId, timestamp: new Date().toISOString(), ...payload });
+  const headers = {
+    'Content-Type':      'application/json',
+    'User-Agent':        'FluxDB-Webhooks/1.0',
+    'X-FluxDB-Event':    event,
+    'X-FluxDB-Delivery': deliveryId,
+  };
+  if (hook.secret) {
+    headers['X-FluxDB-Signature'] =
+      'sha256=' + crypto.createHmac('sha256', hook.secret).update(body).digest('hex');
+  }
+
+  const start = Date.now();
+  let statusCode = null, success = false, error = null;
+  try {
+    const res = await fetch(hook.url, {
+      method: 'POST', headers, body,
+      signal: AbortSignal.timeout(5000),
+    });
+    statusCode = res.status;
+    success    = res.ok;
+  } catch (err) {
+    error = err.name === 'TimeoutError' ? 'Timeout (5 s)' : err.message.slice(0, 120);
+  }
+
+  const entry = {
+    event, statusCode, success, error,
+    duration:  Date.now() - start,
+    timestamp: new Date().toISOString(),
+  };
+  const log = _deliveryLog.get(hook.id) || [];
+  log.unshift(entry);
+  if (log.length > 20) log.pop();
+  _deliveryLog.set(hook.id, log);
+  console.log(`[WEBHOOK] ${event} → ${hook.url} | ${statusCode ?? error} | ${entry.duration}ms`);
+}
+
+// Fire-and-forget — call from any route after a state change
+function fireWebhooks(event, payload) {
+  const hooks = db.get('webhooks').filter({ event, active: true }).value();
+  for (const hook of hooks) deliverWebhook(hook, event, payload).catch(() => {});
+}
 
 // ─── Threat Detection Engine ───────────────────────────────────────────────────
 const _threatLog  = [];           // in-memory ring buffer (max 500 entries)
@@ -499,6 +558,7 @@ app.post('/api/databases', requireMember, (req, res) => {
   };
   db.get('databases').push(newDb).write();
   logActivity('create_db', user.username, name, `Created database "${name}" with ${fields.length} field(s)`);
+  fireWebhooks('database.created', { database: newDb.name, databaseId: newDb.id, fields: newDb.fields, triggeredBy: user.username });
   res.status(201).json(newDb);
 });
 
@@ -549,6 +609,7 @@ app.delete('/api/databases/:id', requireAdmin, (req, res) => {
   db.get('databases').remove({ id: req.params.id }).write();
   db.get('records').remove({ databaseId: req.params.id }).write();
   logActivity('delete_db', user.username, dbToDelete.name, `Deleted database and ${recCount} record(s)`);
+  fireWebhooks('database.deleted', { database: dbToDelete.name, databaseId: dbToDelete.id, triggeredBy: user.username });
   res.json({ message: 'Database and all its records deleted' });
 });
 
@@ -578,6 +639,7 @@ app.post('/api/databases/:dbId/records', requireMember, (req, res) => {
   };
   db.get('records').push(newRecord).write();
   logActivity('create_record', user.username, database.name, `Added record to "${database.name}"`);
+  fireWebhooks('record.created', { database: database.name, databaseId: database.id, record: { id: newRecord.id, ...newRecord.data }, triggeredBy: user.username });
   res.status(201).json(newRecord);
 });
 
@@ -600,7 +662,9 @@ app.put('/api/databases/:dbId/records/:id', requireMember, (req, res) => {
   db.get('records').find({ id: req.params.id })
     .assign({ data: validated.data, updatedAt: new Date().toISOString() }).write();
   logActivity('update_record', user.username, database.name, `Updated record in "${database.name}"`);
-  res.json(db.get('records').find({ id: req.params.id }).value());
+  const updatedRec = db.get('records').find({ id: req.params.id }).value();
+  fireWebhooks('record.updated', { database: database.name, databaseId: database.id, record: { id: updatedRec.id, ...updatedRec.data }, triggeredBy: user.username });
+  res.json(updatedRec);
 });
 
 app.delete('/api/databases/:dbId/records/:id', requireMember, (req, res) => {
@@ -618,6 +682,7 @@ app.delete('/api/databases/:dbId/records/:id', requireMember, (req, res) => {
   logActivity('delete_record', user.username,
     recDb ? recDb.name : req.params.dbId,
     `Deleted record from "${recDb ? recDb.name : req.params.dbId}"`);
+  fireWebhooks('record.deleted', { database: recDb?.name, databaseId: req.params.dbId, recordId: req.params.id, triggeredBy: user.username });
   res.json({ message: 'Record deleted' });
 });
 
@@ -771,6 +836,108 @@ app.post('/api/query', requireAuth, (req, res) => {
   }
 });
 
+// ─── Webhook management routes ───────────────────────────────────────────────
+app.get('/api/webhooks', requireMember, (req, res) => {
+  const user  = getAuthUser(req);
+  const hooks = user.role === 'admin'
+    ? db.get('webhooks').value()
+    : db.get('webhooks').filter({ createdBy: user.username }).value();
+  res.json(hooks.map(h => ({
+    ...h,
+    secret:       h.secret ? '••••••••' : null,
+    lastDelivery: (_deliveryLog.get(h.id) || [])[0] || null,
+  })));
+});
+
+app.post('/api/webhooks', requireMember, (req, res) => {
+  const { event, url, name, secret } = req.body;
+  if (!event || !WEBHOOK_EVENTS.includes(event))
+    return res.status(400).json({ error: `event must be one of: ${WEBHOOK_EVENTS.join(', ')}` });
+  if (!url || !isValidWebhookUrl(url))
+    return res.status(400).json({ error: 'url must be a valid http/https URL' });
+
+  const user = getAuthUser(req);
+  if (db.get('webhooks').filter({ createdBy: user.username }).value().length >= 20)
+    return res.status(400).json({ error: 'Maximum 20 webhooks per user' });
+
+  const hook = {
+    id:        uuidv4(),
+    event,
+    url,
+    name:      (name  || '').trim().slice(0, 60)  || null,
+    secret:    (secret || '').trim().slice(0, 128) || null,
+    createdBy: user.username,
+    createdAt: new Date().toISOString(),
+    active:    true,
+  };
+  db.get('webhooks').push(hook).write();
+  logActivity('create_webhook', user.username, event, `Subscribed to "${event}" → ${url}`);
+  res.status(201).json({ ...hook, secret: hook.secret ? '••••••••' : null });
+});
+
+app.put('/api/webhooks/:id', requireMember, (req, res) => {
+  const hook = db.get('webhooks').find({ id: req.params.id }).value();
+  if (!hook) return res.status(404).json({ error: 'Webhook not found' });
+  const user = getAuthUser(req);
+  if (user.role !== 'admin' && hook.createdBy !== user.username)
+    return res.status(403).json({ error: 'Access denied' });
+
+  const updates = {};
+  const { event, url, name, secret, active } = req.body;
+  if (event !== undefined) {
+    if (!WEBHOOK_EVENTS.includes(event)) return res.status(400).json({ error: 'Invalid event' });
+    updates.event = event;
+  }
+  if (url !== undefined) {
+    if (!isValidWebhookUrl(url)) return res.status(400).json({ error: 'Invalid URL' });
+    updates.url = url;
+  }
+  if (name   !== undefined) updates.name   = (name   || '').trim().slice(0, 60)  || null;
+  if (secret !== undefined) updates.secret = (secret || '').trim().slice(0, 128) || null;
+  if (active !== undefined) updates.active = Boolean(active);
+
+  db.get('webhooks').find({ id: req.params.id }).assign(updates).write();
+  const updated = db.get('webhooks').find({ id: req.params.id }).value();
+  res.json({ ...updated, secret: updated.secret ? '••••••••' : null });
+});
+
+app.delete('/api/webhooks/:id', requireMember, (req, res) => {
+  const hook = db.get('webhooks').find({ id: req.params.id }).value();
+  if (!hook) return res.status(404).json({ error: 'Webhook not found' });
+  const user = getAuthUser(req);
+  if (user.role !== 'admin' && hook.createdBy !== user.username)
+    return res.status(403).json({ error: 'Access denied' });
+  db.get('webhooks').remove({ id: req.params.id }).write();
+  _deliveryLog.delete(req.params.id);
+  logActivity('delete_webhook', user.username, hook.event, `Unsubscribed from "${hook.event}"`);
+  res.json({ message: 'Webhook deleted' });
+});
+
+app.get('/api/webhooks/:id/deliveries', requireMember, (req, res) => {
+  const hook = db.get('webhooks').find({ id: req.params.id }).value();
+  if (!hook) return res.status(404).json({ error: 'Webhook not found' });
+  const user = getAuthUser(req);
+  if (user.role !== 'admin' && hook.createdBy !== user.username)
+    return res.status(403).json({ error: 'Access denied' });
+  res.json(_deliveryLog.get(hook.id) || []);
+});
+
+app.post('/api/webhooks/:id/test', requireMember, (req, res) => {
+  const hook = db.get('webhooks').find({ id: req.params.id }).value();
+  if (!hook) return res.status(404).json({ error: 'Webhook not found' });
+  const user = getAuthUser(req);
+  if (user.role !== 'admin' && hook.createdBy !== user.username)
+    return res.status(403).json({ error: 'Access denied' });
+  deliverWebhook(hook, hook.event, {
+    test:        true,
+    database:    'TestDatabase',
+    databaseId:  'test-id',
+    record:      { id: 'test-record-id', example: 'Test value', count: 42 },
+    triggeredBy: user.username,
+  }).catch(() => {});
+  res.json({ message: 'Test delivery triggered' });
+});
+
 // ─── Threat log endpoints (admin only) ────────────────────────────────────────
 app.get('/api/threats', requireAdmin, (req, res) => {
   res.json([..._threatLog].reverse().slice(0, 200));
@@ -907,6 +1074,7 @@ app.post('/api/v1/:slug', requireMember, resolveSlug, (req, res) => {
   };
   db.get('records').push(newRecord).write();
   logActivity('create_record', user.username, database.name, `Added record to "${database.name}" via REST API`);
+  fireWebhooks('record.created', { database: database.name, databaseId: database.id, record: { id: newRecord.id, ...newRecord.data }, triggeredBy: user.username });
   res.status(201).json(flatRecord(newRecord));
 });
 
@@ -928,7 +1096,9 @@ app.put('/api/v1/:slug/:id', requireMember, resolveSlug, (req, res) => {
   db.get('records').find({ id: req.params.id })
     .assign({ data: validated.data, updatedAt: new Date().toISOString() }).write();
   logActivity('update_record', user.username, database.name, `Updated record in "${database.name}" via REST API`);
-  res.json(flatRecord(db.get('records').find({ id: req.params.id }).value()));
+  const v1Updated = db.get('records').find({ id: req.params.id }).value();
+  fireWebhooks('record.updated', { database: database.name, databaseId: database.id, record: { id: v1Updated.id, ...v1Updated.data }, triggeredBy: user.username });
+  res.json(flatRecord(v1Updated));
 });
 
 // DELETE /api/v1/:slug/:id — delete record
@@ -945,6 +1115,7 @@ app.delete('/api/v1/:slug/:id', requireMember, resolveSlug, (req, res) => {
 
   db.get('records').remove({ id: req.params.id }).write();
   logActivity('delete_record', user.username, database.name, `Deleted record from "${database.name}" via REST API`);
+  fireWebhooks('record.deleted', { database: database.name, databaseId: database.id, recordId: req.params.id, triggeredBy: user.username });
   res.json({ message: 'Record deleted' });
 });
 

@@ -1406,3 +1406,80 @@ select option { background: var(--surface2); }
 .threat-method.method-POST   { background: rgba(101,116,255,.1); color: #7d8aff; }
 .threat-method.method-PUT    { background: rgba(255,169,77,.1);  color: #ffa94d; }
 .threat-method.method-DELETE { background: rgba(240,101,101,.1); color: #f06565; }
+
+/* ── Webhooks View ───────────────────────────────────────────────────────── */
+#webhook-list { display: flex; flex-direction: column; gap: 12px; padding-bottom: 32px; }
+
+.webhook-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px 18px;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  justify-content: space-between;
+  transition: border-color var(--t) var(--ease);
+}
+.webhook-card:hover  { border-color: var(--border-h); }
+.wh-inactive { opacity: .55; }
+
+.wh-card-left { display: flex; flex-direction: column; gap: 7px; min-width: 0; flex: 1; }
+
+.wh-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+.wh-event-tag {
+  font-size: .8rem;
+  font-weight: 650;
+}
+
+.wh-name {
+  font-size: .8rem;
+  color: var(--text-muted);
+}
+
+.wh-status-badge {
+  font-size: .65rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  padding: 2px 7px;
+  border-radius: 5px;
+}
+.wh-active { background: rgba(45,206,137,.12); color: #2dce89; border: 1px solid rgba(45,206,137,.25); }
+.wh-paused { background: rgba(109,118,153,.12); color: #9da8c8; border: 1px solid rgba(109,118,153,.25); }
+
+.wh-url-row { display: flex; align-items: center; gap: 8px; }
+.wh-url {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: .76rem;
+  color: var(--accent-h);
+  background: var(--accent-dim);
+  padding: 2px 8px;
+  border-radius: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 480px;
+}
+
+.wh-meta-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+
+.wh-delivery-ok   { color: var(--success); font-size: .78rem; font-weight: 600; }
+.wh-delivery-fail { color: var(--danger);  font-size: .78rem; font-weight: 600; }
+
+.wh-signed-badge {
+  font-size: .72rem;
+  color: var(--warn);
+  background: rgba(255,169,77,.1);
+  border: 1px solid rgba(255,169,77,.2);
+  border-radius: 5px;
+  padding: 1px 6px;
+}
+
+.wh-card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+  min-width: 110px;
+}

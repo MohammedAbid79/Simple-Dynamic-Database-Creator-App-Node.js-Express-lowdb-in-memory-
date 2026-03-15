@@ -82,6 +82,7 @@ document.querySelectorAll('.nav-btn[data-view]').forEach(btn => {
     if (btn.dataset.view === 'query')     loadQuerySchema();
     if (btn.dataset.view === 'restapi')  loadRestApis();
     if (btn.dataset.view === 'threats')  loadThreats();
+    if (btn.dataset.view === 'webhooks') loadWebhooks();
   });
 });
 
@@ -128,8 +129,10 @@ async function bootApp() {
   if (isAdmin) setInterval(refreshThreatBadge, 30_000);
 
   // Admin + member (not guest)
-  document.getElementById('btn-create-db').style.display  = (isAdmin || isMember) ? '' : 'none';
-  document.getElementById('nav-apikeys').style.display     = (isAdmin || isMember) ? '' : 'none';
+  document.getElementById('btn-create-db').style.display   = (isAdmin || isMember) ? '' : 'none';
+  document.getElementById('nav-apikeys').style.display      = (isAdmin || isMember) ? '' : 'none';
+  document.getElementById('nav-webhooks').style.display     = (isAdmin || isMember) ? '' : 'none';
+  document.getElementById('btn-create-webhook').style.display = (isAdmin || isMember) ? '' : 'none';
 
   showView('view-databases');
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -1150,3 +1153,146 @@ function hideThreatBadge() {
 document.querySelector('.nav-btn[data-view="threats"]').addEventListener('click', () => {
   hideThreatBadge();
 });
+
+/* ════════════════════════════════════════════════════════════════════════════
+   WEBHOOKS VIEW
+   ════════════════════════════════════════════════════════════════════════════ */
+
+const WEBHOOK_EVENT_META = {
+  'record.created':   { icon: '➕', label: 'Record Created',   color: 'var(--success)' },
+  'record.updated':   { icon: '🔄', label: 'Record Updated',   color: 'var(--accent)'  },
+  'record.deleted':   { icon: '🗑️', label: 'Record Deleted',   color: 'var(--danger)'  },
+  'database.created': { icon: '📁', label: 'Database Created', color: 'var(--success)' },
+  'database.deleted': { icon: '💥', label: 'Database Deleted', color: 'var(--danger)'  },
+};
+
+document.getElementById('btn-create-webhook').onclick = () => {
+  const eventOpts = Object.entries(WEBHOOK_EVENT_META).map(([val, m]) =>
+    `<option value="${val}">${m.icon} ${m.label}</option>`).join('');
+  openModal('New Webhook', `
+    <label>Name <span style="color:var(--text-muted);font-weight:400">(optional label)</span></label>
+    <input id="wh-name" type="text" placeholder="e.g. Notify Slack" maxlength="60" />
+    <label style="margin-top:14px">Event</label>
+    <select id="wh-event">${eventOpts}</select>
+    <label style="margin-top:14px">URL <span style="color:var(--danger)">*</span></label>
+    <input id="wh-url" type="url" placeholder="https://myapp.com/webhook" />
+    <label style="margin-top:14px">Secret <span style="color:var(--text-muted);font-weight:400">(optional — used for HMAC signature)</span></label>
+    <input id="wh-secret" type="password" placeholder="leave blank to skip signing" />`,
+    async () => {
+      const name   = document.getElementById('wh-name').value.trim();
+      const event  = document.getElementById('wh-event').value;
+      const url    = document.getElementById('wh-url').value.trim();
+      const secret = document.getElementById('wh-secret').value;
+      if (!url) return toast('URL is required', 'error');
+      try {
+        await api('POST', '/webhooks', { name, event, url, secret: secret || undefined });
+        closeModal();
+        toast('Webhook registered!', 'success');
+        loadWebhooks();
+      } catch (err) { toast(err.message, 'error'); }
+    }, 'Register');
+};
+
+async function loadWebhooks() {
+  const wrap = document.getElementById('webhook-list');
+  wrap.innerHTML = '<p class="empty-state">Loading…</p>';
+  try {
+    const hooks = await api('GET', '/webhooks');
+    if (!hooks.length) {
+      wrap.innerHTML = '<div class="empty-state">No webhooks yet. Click <b>+ New Webhook</b> to subscribe to an event.</div>';
+      return;
+    }
+    wrap.innerHTML = hooks.map(h => renderWebhookCard(h)).join('');
+  } catch (err) {
+    wrap.innerHTML = `<p class="empty-state" style="color:var(--danger)">${esc(err.message)}</p>`;
+  }
+}
+
+function renderWebhookCard(h) {
+  const meta = WEBHOOK_EVENT_META[h.event] || { icon: '📡', label: h.event, color: 'var(--text-muted)' };
+  const lastD = h.lastDelivery;
+  const lastStatus = lastD
+    ? (lastD.success
+        ? `<span class="wh-delivery-ok">✓ ${lastD.statusCode} · ${lastD.duration}ms</span>`
+        : `<span class="wh-delivery-fail">✗ ${lastD.error || lastD.statusCode || 'Failed'}</span>`)
+    : `<span style="color:var(--text-muted)">Never fired</span>`;
+
+  return `
+    <div class="webhook-card${h.active ? '' : ' wh-inactive'}" id="wh-${h.id}">
+      <div class="wh-card-left">
+        <div class="wh-top">
+          <span class="wh-event-tag" style="color:${meta.color}">${meta.icon} ${esc(meta.label)}</span>
+          ${h.name ? `<span class="wh-name">${esc(h.name)}</span>` : ''}
+          ${h.active
+            ? '<span class="wh-status-badge wh-active">ACTIVE</span>'
+            : '<span class="wh-status-badge wh-paused">PAUSED</span>'}
+        </div>
+        <div class="wh-url-row">
+          <code class="wh-url">${esc(h.url)}</code>
+          <button class="btn btn-sm btn-ghost" onclick="copyText(${JSON.stringify(h.url)})" title="Copy URL">&#128203;</button>
+        </div>
+        <div class="wh-meta-row">
+          <span class="wh-last-delivery">${lastStatus}</span>
+          <span style="color:var(--text-muted);font-size:.73rem">Created ${fmtDate(h.createdAt)}</span>
+          ${h.secret ? '<span class="wh-signed-badge">🔒 Signed</span>' : ''}
+        </div>
+      </div>
+      <div class="wh-card-actions">
+        <button class="btn btn-sm btn-outline" onclick="testWebhook('${h.id}')" title="Send test payload">&#9654; Test</button>
+        <button class="btn btn-sm btn-outline" onclick="viewDeliveries('${h.id}','${esc(h.event)}')" title="Delivery log">&#128200; Log</button>
+        <button class="btn btn-sm btn-outline" onclick="toggleWebhook('${h.id}',${h.active})">${h.active ? '&#9646;&#9646; Pause' : '&#9654; Resume'}</button>
+        <button class="btn btn-sm btn-danger"  onclick="deleteWebhook('${h.id}','${esc(h.event)}')">&#128465;</button>
+      </div>
+    </div>`;
+}
+
+async function testWebhook(id) {
+  try {
+    await api('POST', `/webhooks/${id}/test`);
+    toast('Test delivery sent!', 'success');
+    setTimeout(loadWebhooks, 1500);  // refresh after delivery logs in
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function toggleWebhook(id, currentlyActive) {
+  try {
+    await api('PUT', `/webhooks/${id}`, { active: !currentlyActive });
+    toast(currentlyActive ? 'Webhook paused' : 'Webhook resumed', 'success');
+    loadWebhooks();
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+function deleteWebhook(id, event) {
+  openModal('Delete Webhook', `<p>Remove the <b>${esc(event)}</b> webhook? Any future events will no longer be delivered to that URL.</p>`,
+    async () => {
+      try {
+        await api('DELETE', `/webhooks/${id}`);
+        closeModal();
+        toast('Webhook deleted', 'success');
+        loadWebhooks();
+      } catch (err) { toast(err.message, 'error'); }
+    }, 'Delete');
+}
+
+async function viewDeliveries(id, event) {
+  try {
+    const log = await api('GET', `/webhooks/${id}/deliveries`);
+    const rows = log.length
+      ? log.map(d => `<tr>
+          <td>${d.success
+            ? '<span class="wh-delivery-ok">✓ Success</span>'
+            : '<span class="wh-delivery-fail">✗ Failed</span>'}</td>
+          <td>${d.statusCode ?? '<span style="color:var(--text-muted)">—</span>'}</td>
+          <td>${d.duration} ms</td>
+          <td style="color:var(--danger);font-size:.76rem">${esc(d.error || '')}</td>
+          <td style="color:var(--text-muted);font-size:.74rem;white-space:nowrap">${fmtDate(d.timestamp)}</td>
+        </tr>`).join('')
+      : '<tr><td colspan="5" style="text-align:center;color:var(--text-muted)">No deliveries yet</td></tr>';
+
+    openModal(`Delivery Log — ${esc(event)}`,
+      `<div class="table-wrap"><table>
+        <thead><tr><th>Status</th><th>HTTP</th><th>Duration</th><th>Error</th><th>Time</th></tr></thead>
+        <tbody>${rows}</tbody>
+       </table></div>`, null);
+  } catch (err) { toast(err.message, 'error'); }
+}

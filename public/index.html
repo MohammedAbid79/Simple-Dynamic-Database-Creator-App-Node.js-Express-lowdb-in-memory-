@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FluxDB</title>
-  <link rel="stylesheet" href="/style.css?v=7" />
+  <link rel="stylesheet" href="/style.css?v=8" />
 </head>
 <body>
   <!-- ── App Shell ── -->
@@ -78,6 +78,16 @@
             <path d="M11 15h4"/>
           </svg>
           <span class="nav-label">REST API</span>
+        </button>
+
+        <button class="nav-btn" id="nav-webhooks" data-view="webhooks" title="Webhooks" style="display:none">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 10a7 7 0 1 0 14 0A7 7 0 0 0 3 10"/>
+            <path d="M10 7v3l2 2"/>
+            <path d="M14.5 3.5L17 6"/>
+            <path d="M3 6l2.5-2.5"/>
+          </svg>
+          <span class="nav-label">Webhooks</span>
         </button>
 
         <button class="nav-btn" id="nav-apikeys" data-view="apikeys" title="API Keys" style="display:none">
@@ -198,6 +208,16 @@
         <div id="threat-list" class="table-wrap"></div>
       </div>
 
+      <!-- Webhooks View -->
+      <div id="view-webhooks" class="view">
+        <div class="view-header">
+          <h2>Webhooks</h2>
+          <button id="btn-create-webhook" class="btn btn-primary" style="display:none">+ New Webhook</button>
+        </div>
+        <p class="apikey-hint">Subscribe to events and receive HTTP POST requests to your URL when they fire. Optionally set a secret to verify payloads with <code>X-FluxDB-Signature: sha256=…</code></p>
+        <div id="webhook-list"></div>
+      </div>
+
       <!-- REST API Generator View -->
       <div id="view-restapi" class="view">
         <div class="view-header">
@@ -233,6 +253,6 @@
   <!-- Toast -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/app.js?v=6"></script>
+  <script src="/app.js?v=7"></script>
 </body>
 </html>
