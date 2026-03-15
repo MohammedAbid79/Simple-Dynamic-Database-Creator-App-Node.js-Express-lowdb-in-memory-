@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FluxDB</title>
-  <link rel="stylesheet" href="/style.css?v=11" />
+  <link rel="stylesheet" href="/style.css?v=12" />
 </head>
 <body>
   <!-- ── App Shell ── -->
@@ -26,7 +26,17 @@
       </div>
 
       <nav>
-        <button class="nav-btn active" data-view="databases" title="Databases">
+        <button class="nav-btn active" data-view="dashboard" title="Dashboard">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="2.5" y="2.5" width="6" height="6" rx="1.2"/>
+            <rect x="11.5" y="2.5" width="6" height="6" rx="1.2"/>
+            <rect x="2.5" y="11.5" width="6" height="6" rx="1.2"/>
+            <rect x="11.5" y="11.5" width="6" height="6" rx="1.2"/>
+          </svg>
+          <span class="nav-label">Dashboard</span>
+        </button>
+
+        <button class="nav-btn" data-view="databases" title="Databases">
           <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <ellipse cx="10" cy="5.5" rx="6.5" ry="2.3"/>
             <path d="M3.5 5.5v4c0 1.27 2.91 2.3 6.5 2.3s6.5-1.03 6.5-2.3v-4"/>
@@ -127,8 +137,43 @@
 
     <!-- Main content -->
     <main id="main-content">
+      <!-- Dashboard View -->
+      <div id="view-dashboard" class="view active">
+        <div class="view-header">
+          <h2>Dashboard</h2>
+          <button id="btn-refresh-dashboard" class="btn btn-outline btn-sm">&#8635; Refresh</button>
+        </div>
+        <!-- Stat cards -->
+        <div id="dash-stats" class="dash-stats-grid"></div>
+        <!-- Bottom row: top databases + recent activity -->
+        <div class="dash-bottom-row">
+          <div class="dash-panel" id="dash-top-dbs-panel">
+            <div class="dash-panel-hd">
+              <span>Top Databases</span>
+              <button class="btn btn-ghost btn-sm" onclick="navigate('databases')">View all &#8594;</button>
+            </div>
+            <div id="dash-top-dbs" class="dash-panel-body"></div>
+          </div>
+          <div class="dash-panel" id="dash-activity-panel">
+            <div class="dash-panel-hd">
+              <span>Recent Activity</span>
+              <button class="btn btn-ghost btn-sm" id="dash-activity-link">View all &#8594;</button>
+            </div>
+            <div id="dash-activity" class="dash-panel-body"></div>
+          </div>
+        </div>
+        <!-- Quick actions -->
+        <div class="dash-quickactions">
+          <span class="dash-qa-label">Quick actions</span>
+          <button class="btn btn-primary btn-sm" id="dash-qa-create-db">+ New Database</button>
+          <button class="btn btn-outline btn-sm" id="dash-qa-import">&#8679; Import Dataset</button>
+          <button class="btn btn-ghost btn-sm" onclick="navigate('query')">&#9654; Query Engine</button>
+          <button class="btn btn-ghost btn-sm" onclick="navigate('restapi')">&#128279; REST API</button>
+        </div>
+      </div>
+
       <!-- Databases View -->
-      <div id="view-databases" class="view active">
+      <div id="view-databases" class="view">
         <div class="view-header">
           <h2>Databases</h2>
           <button id="btn-import-dataset" class="btn btn-outline" style="display:none">&#8679; Import Dataset</button>
@@ -273,6 +318,6 @@
   <!-- Toast -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/app.js?v=9"></script>
+  <script src="/app.js?v=10"></script>
 </body>
 </html>

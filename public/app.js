@@ -76,11 +76,12 @@ document.querySelectorAll('.nav-btn[data-view]').forEach(btn => {
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     showView('view-' + btn.dataset.view);
-    if (btn.dataset.view === 'databases') loadDatabases();
-    if (btn.dataset.view === 'users')     loadUsers();
-    if (btn.dataset.view === 'activity')  loadActivity();
-    if (btn.dataset.view === 'apikeys')   loadApiKeys();
-    if (btn.dataset.view === 'query')     loadQuerySchema();
+    if (btn.dataset.view === 'dashboard')   loadDashboard();
+    if (btn.dataset.view === 'databases')   loadDatabases();
+    if (btn.dataset.view === 'users')       loadUsers();
+    if (btn.dataset.view === 'activity')    loadActivity();
+    if (btn.dataset.view === 'apikeys')     loadApiKeys();
+    if (btn.dataset.view === 'query')       loadQuerySchema();
     if (btn.dataset.view === 'restapi')     loadRestApis();
     if (btn.dataset.view === 'threats')     loadThreats();
     if (btn.dataset.view === 'webhooks')    loadWebhooks();
@@ -138,11 +139,11 @@ async function bootApp() {
   document.getElementById('nav-webhooks').style.display        = (isAdmin || isMember) ? '' : 'none';
   document.getElementById('btn-create-webhook').style.display  = (isAdmin || isMember) ? '' : 'none';
 
-  showView('view-databases');
+  showView('view-dashboard');
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-  document.querySelector('.nav-btn[data-view="databases"]').classList.add('active');
+  document.querySelector('.nav-btn[data-view="dashboard"]').classList.add('active');
 
-  await loadDatabases();
+  await loadDashboard();
 }
 
 /* ── Initialise: check existing session ────────────────────────────────────── */
@@ -154,6 +155,137 @@ async function bootApp() {
     window.location.href = '/login';
   }
 })();
+
+/* ── navigate() — programmatic nav helper ───────────────────────────────────── */
+function navigate(view) {
+  const btn = document.querySelector(`.nav-btn[data-view="${view}"]`);
+  if (btn) btn.click();
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   DASHBOARD VIEW
+   ════════════════════════════════════════════════════════════════════════════ */
+
+const DASH_STAT_META = {
+  databases:   { label: 'Databases',    icon: '🗄',  color: 'var(--accent)',   link: 'databases'  },
+  records:     { label: 'Records',      icon: '📄',  color: 'var(--success)',  link: 'databases'  },
+  users:       { label: 'Users',        icon: '👤',  color: 'var(--warn)',     link: 'users'      },
+  apiKeys:     { label: 'API Keys',     icon: '🔑',  color: 'var(--accent-h)', link: 'apikeys'    },
+  webhooks:    { label: 'Webhooks',     icon: '🔗',  color: 'var(--accent)',   link: 'webhooks'   },
+  credentials: { label: 'Credentials', icon: '🔐',  color: 'var(--warn)',     link: 'credentials'},
+};
+
+const DASH_ACTION_META = {
+  create_db:          { icon: '🗄', label: 'Created database' },
+  delete_db:          { icon: '🗑', label: 'Deleted database' },
+  create_record:      { icon: '➕', label: 'Created record'   },
+  update_record:      { icon: '✏️', label: 'Updated record'   },
+  delete_record:      { icon: '🗑', label: 'Deleted record'   },
+  import_dataset:     { icon: '📥', label: 'Imported dataset' },
+  create_credential:  { icon: '🔐', label: 'Added credential' },
+  update_credential:  { icon: '✏️', label: 'Updated credential'},
+  delete_credential:  { icon: '🗑', label: 'Deleted credential'},
+  reveal_credential:  { icon: '👁', label: 'Revealed credential'},
+  create_user:        { icon: '👤', label: 'Created user'     },
+  delete_user:        { icon: '🗑', label: 'Deleted user'     },
+  create_key:         { icon: '🔑', label: 'Generated API key'},
+  delete_key:         { icon: '🗑', label: 'Revoked API key'  },
+  login:              { icon: '🔓', label: 'Logged in'        },
+  logout:             { icon: '🔒', label: 'Logged out'       },
+};
+
+async function loadDashboard() {
+  try {
+    const { stats, topDatabases, recentActivity, threatStats } = await api('GET', '/dashboard');
+    renderDashStats(stats, threatStats);
+    renderDashTopDbs(topDatabases);
+    renderDashActivity(recentActivity);
+  } catch (err) {
+    document.getElementById('dash-stats').innerHTML =
+      `<p class="empty-state" style="color:var(--danger)">${esc(err.message)}</p>`;
+  }
+}
+
+function renderDashStats(stats, threatStats) {
+  const isAdmin = currentUser.role === 'admin';
+  const grid = document.getElementById('dash-stats');
+
+  const cards = Object.entries(DASH_STAT_META)
+    .filter(([key]) => stats[key] !== null && stats[key] !== undefined)
+    .map(([key, meta]) => {
+      const val = stats[key];
+      return `
+        <button class="dash-stat-card" onclick="navigate('${meta.link}')" title="Go to ${meta.label}">
+          <div class="dash-stat-icon" style="color:${meta.color}">${meta.icon}</div>
+          <div class="dash-stat-body">
+            <div class="dash-stat-value">${val}</div>
+            <div class="dash-stat-label">${meta.label}</div>
+          </div>
+        </button>`;
+    });
+
+  if (isAdmin && threatStats) {
+    cards.push(`
+      <button class="dash-stat-card ${threatStats.blocked > 0 ? 'dash-stat-danger' : ''}" onclick="navigate('threats')" title="Go to Threat Monitor">
+        <div class="dash-stat-icon" style="color:var(--danger)">🛡</div>
+        <div class="dash-stat-body">
+          <div class="dash-stat-value">${threatStats.total}</div>
+          <div class="dash-stat-label">Threats <span class="dash-stat-sub">(${threatStats.blocked} blocked)</span></div>
+        </div>
+      </button>`);
+  }
+
+  grid.innerHTML = cards.join('');
+}
+
+function renderDashTopDbs(dbs) {
+  const el = document.getElementById('dash-top-dbs');
+  if (!dbs.length) {
+    el.innerHTML = '<p class="dash-empty">No databases yet.</p>';
+    return;
+  }
+  const max = dbs[0].recordCount || 1;
+  el.innerHTML = dbs.map(d => `
+    <div class="dash-db-row" onclick="navigate('databases')" title="Browse ${esc(d.name)}">
+      <span class="dash-db-name">${esc(d.name)}</span>
+      <div class="dash-db-bar-wrap">
+        <div class="dash-db-bar" style="width:${Math.max(4, Math.round((d.recordCount / max) * 100))}%"></div>
+      </div>
+      <span class="dash-db-count">${d.recordCount}</span>
+    </div>`).join('');
+}
+
+function renderDashActivity(log) {
+  const el = document.getElementById('dash-activity');
+  if (!log.length) {
+    el.innerHTML = '<p class="dash-empty">No activity yet.</p>';
+    return;
+  }
+  el.innerHTML = log.map(entry => {
+    const meta = DASH_ACTION_META[entry.action] || { icon: '·', label: entry.action };
+    return `
+      <div class="dash-activity-row">
+        <span class="dash-act-icon">${meta.icon}</span>
+        <div class="dash-act-body">
+          <span class="dash-act-label">${meta.label}</span>
+          ${entry.target ? `<span class="dash-act-target"> — ${esc(entry.target)}</span>` : ''}
+          <span class="dash-act-user">by ${esc(entry.user)}</span>
+        </div>
+        <span class="dash-act-time">${fmtDate(entry.timestamp)}</span>
+      </div>`;
+  }).join('');
+}
+
+document.getElementById('btn-refresh-dashboard').onclick = loadDashboard;
+document.getElementById('dash-activity-link').onclick = () => navigate('activity');
+document.getElementById('dash-qa-create-db').onclick = () => {
+  navigate('databases');
+  setTimeout(() => document.getElementById('btn-create-db').click(), 100);
+};
+document.getElementById('dash-qa-import').onclick = () => {
+  navigate('databases');
+  setTimeout(() => document.getElementById('btn-import-dataset').click(), 100);
+};
 
 /* ════════════════════════════════════════════════════════════════════════════
    DATABASE VIEW

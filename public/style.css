@@ -1802,3 +1802,196 @@ select option { background: var(--surface2); }
   gap: 6px;
   flex-shrink: 0;
 }
+
+/* ── Dashboard ──────────────────────────────────────────────────────────────── */
+
+/* Stat cards grid */
+.dash-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.dash-stat-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--t) var(--ease), transform var(--t) var(--ease), box-shadow var(--t) var(--ease);
+  width: 100%;
+}
+.dash-stat-card:hover {
+  border-color: var(--border-h);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 24px rgba(0,0,0,.3);
+}
+.dash-stat-card.dash-stat-danger {
+  border-color: rgba(240,101,101,.35);
+  background: rgba(240,101,101,.05);
+}
+.dash-stat-card.dash-stat-danger:hover { border-color: var(--danger); }
+
+.dash-stat-icon {
+  font-size: 1.6rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.dash-stat-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.dash-stat-value {
+  font-size: 1.65rem;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1;
+  letter-spacing: -.02em;
+}
+.dash-stat-label {
+  font-size: .74rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  font-weight: 600;
+}
+.dash-stat-sub {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* Bottom row */
+.dash-bottom-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+@media (max-width: 780px) {
+  .dash-bottom-row { grid-template-columns: 1fr; }
+}
+
+.dash-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.dash-panel-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: .8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--text-muted);
+}
+.dash-panel-body {
+  padding: 8px 0;
+  flex: 1;
+  overflow-y: auto;
+  max-height: 240px;
+}
+.dash-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: .84rem;
+  margin: 0;
+}
+
+/* Top databases bar chart rows */
+.dash-db-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: background var(--t) var(--ease);
+  border-radius: 0;
+}
+.dash-db-row:hover { background: var(--surface2); }
+.dash-db-name {
+  font-size: .84rem;
+  color: var(--text);
+  width: 130px;
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dash-db-bar-wrap {
+  flex: 1;
+  height: 6px;
+  background: var(--surface3);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.dash-db-bar {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width .4s cubic-bezier(.4,0,.2,1);
+}
+.dash-db-count {
+  font-size: .78rem;
+  color: var(--text-muted);
+  min-width: 28px;
+  text-align: right;
+}
+
+/* Recent activity rows */
+.dash-activity-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: .82rem;
+}
+.dash-activity-row:last-child { border-bottom: none; }
+.dash-act-icon { font-size: 1rem; flex-shrink: 0; line-height: 1.4; }
+.dash-act-body { flex: 1; min-width: 0; }
+.dash-act-label { color: var(--text); font-weight: 500; }
+.dash-act-target { color: var(--text-muted); }
+.dash-act-user {
+  display: block;
+  font-size: .74rem;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+.dash-act-time {
+  font-size: .72rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+
+/* Quick actions bar */
+.dash-quickactions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 14px 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.dash-qa-label {
+  font-size: .74rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-muted);
+  margin-right: 4px;
+}

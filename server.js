@@ -526,6 +526,44 @@ app.delete('/api/keys/:id', requireMember, (req, res) => {
   res.json({ message: 'API key revoked' });
 });
 
+// ─── Dashboard ────────────────────────────────────────────────────────────────
+// GET /api/dashboard — aggregated stats for the admin dashboard
+app.get('/api/dashboard', requireAuth, (req, res) => {
+  const user      = getAuthUser(req);
+  const isAdmin   = user.role === 'admin';
+
+  const databases = db.get('databases').value();
+  const records   = db.get('records').value();
+
+  // Top 5 databases by record count
+  const topDatabases = databases
+    .map(d => ({ id: d.id, name: d.name, recordCount: records.filter(r => r.databaseId === d.id).length }))
+    .sort((a, b) => b.recordCount - a.recordCount)
+    .slice(0, 5);
+
+  // Recent activity (last 8 entries)
+  const recentActivity = db.get('activityLog').value().slice(-8).reverse();
+
+  // Threat summary (admin only to avoid leaking threat data to members)
+  let threatStats = null;
+  if (isAdmin) {
+    const now = Date.now();
+    const blocked = [..._blockedIPs.entries()].filter(([, exp]) => exp > now).length;
+    threatStats = { total: _threatLog.length, blocked };
+  }
+
+  const stats = {
+    databases:   databases.length,
+    records:     records.length,
+    users:       isAdmin ? db.get('users').value().length : null,
+    apiKeys:     db.get('apiKeys').value().filter(k => isAdmin || k.userId === user.id).length,
+    webhooks:    isAdmin ? db.get('webhooks').value().length : null,
+    credentials: isAdmin ? db.get('credentials').value().length : null,
+  };
+
+  res.json({ stats, topDatabases, recentActivity, threatStats });
+});
+
 // ─── Database management ─────────────────────────────────────────────────────
 app.get('/api/databases', requireAuth, (req, res) => {
   const dbs    = db.get('databases').value();
