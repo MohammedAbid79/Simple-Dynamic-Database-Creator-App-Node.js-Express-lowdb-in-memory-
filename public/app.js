@@ -79,6 +79,7 @@ document.querySelectorAll('.nav-btn[data-view]').forEach(btn => {
     if (btn.dataset.view === 'users')     loadUsers();
     if (btn.dataset.view === 'activity')  loadActivity();
     if (btn.dataset.view === 'apikeys')   loadApiKeys();
+    if (btn.dataset.view === 'query')     loadQuerySchema();
   });
 });
 
@@ -780,4 +781,153 @@ function fmtDate(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
   return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   QUERY ENGINE
+   ════════════════════════════════════════════════════════════════════════════ */
+
+// ── Schema sidebar ────────────────────────────────────────────────────────────
+async function loadQuerySchema() {
+  const body = document.getElementById('schema-body');
+  body.innerHTML = '<div class="schema-empty">Loading…</div>';
+  try {
+    const tables = await api('GET', '/query/schema');
+    if (!tables.length) {
+      body.innerHTML = '<div class="schema-empty">No tables yet.<br>Create a database first.</div>';
+      return;
+    }
+    body.innerHTML = tables.map(t => `
+      <div class="schema-table">
+        <button class="schema-table-btn" onclick="insertTableQuery(${JSON.stringify(t.name)})" title="Click to generate SELECT query">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <ellipse cx="10" cy="5.5" rx="6.5" ry="2.3"/>
+            <path d="M3.5 5.5v4c0 1.27 2.91 2.3 6.5 2.3s6.5-1.03 6.5-2.3v-4"/>
+            <path d="M3.5 9.5v4c0 1.27 2.91 2.3 6.5 2.3s6.5-1.03 6.5-2.3v-4"/>
+          </svg>
+          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.name)}</span>
+          <span class="schema-row-count">${t.recordCount}</span>
+        </button>
+        <div class="schema-fields">
+          ${t.fields.map(f => `
+            <div class="schema-field-row" onclick="insertFieldName(${JSON.stringify(f.name)})" title="Insert field name">
+              <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.name)}</span>
+              <span class="schema-field-type sft-${f.type}">${f.type}</span>
+            </div>`).join('')}
+        </div>
+      </div>`).join('');
+  } catch (err) {
+    body.innerHTML = `<div class="schema-empty">${esc(err.message)}</div>`;
+  }
+}
+
+function insertTableQuery(name) {
+  const el = document.getElementById('query-input');
+  const q = /\s/.test(name) ? `\`${name}\`` : name;
+  el.value = `SELECT *\nFROM ${q}\nLIMIT 100`;
+  el.focus();
+}
+
+function insertFieldName(name) {
+  const el = document.getElementById('query-input');
+  const start = el.selectionStart, end = el.selectionEnd;
+  el.value = el.value.slice(0, start) + name + el.value.slice(end);
+  el.selectionStart = el.selectionEnd = start + name.length;
+  el.focus();
+}
+
+// ── Run query ─────────────────────────────────────────────────────────────────
+document.getElementById('btn-run-query').addEventListener('click', runQuery);
+document.getElementById('btn-clear-query').addEventListener('click', () => {
+  document.getElementById('query-input').value = '';
+  document.getElementById('query-results').innerHTML =
+    '<div class="query-empty-state">Write a query above and press <strong>Run</strong> to see results.</div>';
+  document.getElementById('query-input').focus();
+});
+document.getElementById('query-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runQuery(); }
+});
+
+async function runQuery() {
+  const sql = document.getElementById('query-input').value.trim();
+  if (!sql) return;
+
+  const resultsEl = document.getElementById('query-results');
+  resultsEl.innerHTML = `
+    <div class="query-spinner">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M9 2a7 7 0 0 1 0 14"/>
+      </svg>
+      Running query…
+    </div>`;
+
+  try {
+    const data = await api('POST', '/query', { sql });
+    renderQueryResults(resultsEl, data);
+  } catch (err) {
+    resultsEl.innerHTML = `
+      <div class="query-error-box">
+        <strong>Error:</strong> ${esc(err.message)}
+      </div>`;
+  }
+}
+
+function renderQueryResults(el, { columns, rows, rowCount, elapsed, truncated }) {
+  if (!columns.length) {
+    el.innerHTML = '<div class="query-empty-state">Query returned no results.</div>';
+    return;
+  }
+
+  const truncMsg = truncated
+    ? `<span class="qm-trunc">⚠ Showing first 2,000 of ${rowCount.toLocaleString()} rows</span>`
+    : '';
+
+  const thead = `<thead><tr>${columns.map(c =>
+    `<th>${esc(c)}</th>`).join('')}</tr></thead>`;
+
+  const tbody = `<tbody>${rows.map(row =>
+    `<tr>${columns.map(col => {
+      const v = row[col];
+      if (v === null || v === undefined) return `<td><span class="query-null">null</span></td>`;
+      if (typeof v === 'boolean') return `<td><span class="query-bool-${v}">${v}</span></td>`;
+      if (typeof v === 'number')  return `<td><span class="query-number">${v}</span></td>`;
+      return `<td>${esc(String(v))}</td>`;
+    }).join('')}</tr>`
+  ).join('')}</tbody>`;
+
+  el.innerHTML = `
+    <div class="query-results-meta">
+      <span class="qm-rows">↳ ${rowCount.toLocaleString()} row${rowCount !== 1 ? 's' : ''}</span>
+      <span class="qm-time">${elapsed} ms</span>
+      ${truncMsg}
+      <button class="btn btn-outline btn-sm" style="margin-left:auto" onclick="exportQueryCSV(${JSON.stringify(columns)}, this)">
+        ↓ Export CSV
+      </button>
+    </div>
+    <div class="query-results-table-wrap">
+      <table>${thead}${tbody}</table>
+    </div>`;
+
+  // Store results for CSV export
+  el._lastColumns = columns;
+  el._lastRows    = rows;
+}
+
+function exportQueryCSV(columns, btn) {
+  const el   = document.getElementById('query-results');
+  const rows = el._lastRows || [];
+  const header = columns.map(c => `"${c}"`).join(',');
+  const body   = rows.map(row =>
+    columns.map(c => {
+      const v = row[c];
+      if (v === null || v === undefined) return '';
+      return `"${String(v).replace(/"/g, '""')}"`;
+    }).join(',')
+  ).join('\n');
+  const blob = new Blob([header + '\n' + body], { type: 'text/csv' });
+  const a = Object.assign(document.createElement('a'), {
+    href: URL.createObjectURL(blob),
+    download: `query-results-${Date.now()}.csv`,
+  });
+  a.click(); URL.revokeObjectURL(a.href);
 }

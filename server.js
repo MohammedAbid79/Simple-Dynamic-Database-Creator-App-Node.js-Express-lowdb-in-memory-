@@ -9,6 +9,7 @@ const path       = require('path');
 const os         = require('os');
 const swaggerUi  = require('swagger-ui-express');
 const swaggerSpec = require('./swagger');
+const alasql     = require('alasql');
 
 // ─── In-Memory lowdb setup ────────────────────────────────────────────────────
 const low    = require('lowdb');
@@ -516,6 +517,88 @@ function validateRecordData(data, fields) {
   }
   return { data: result };
 }
+
+// ─── Query engine ────────────────────────────────────────────────────────────
+// Returns table/field schema for the query editor sidebar
+app.get('/api/query/schema', requireAuth, (req, res) => {
+  const result = db.get('databases').value().map(d => ({
+    name: d.name,
+    recordCount: db.get('records').filter({ databaseId: d.id }).value().length,
+    fields: [
+      { name: 'id',        type: 'uuid'     },
+      { name: 'createdBy', type: 'string'   },
+      { name: 'createdAt', type: 'datetime' },
+      { name: 'updatedAt', type: 'datetime' },
+      ...d.fields.map(f => ({ name: f.name, type: f.type })),
+    ],
+  }));
+  res.json(result);
+});
+
+// Simple mutex so concurrent requests don't corrupt alasql's global table state
+let _queryLock = false;
+
+app.post('/api/query', requireAuth, (req, res) => {
+  const { sql } = req.body;
+  if (!sql || !sql.trim()) {
+    return res.status(400).json({ error: 'SQL query is required' });
+  }
+
+  // Strip comments then check the first keyword
+  const stripped = sql
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/--[^\n]*/g, '')
+    .trim();
+  if (!/^SELECT\b/i.test(stripped)) {
+    return res.status(400).json({ error: 'Only SELECT queries are supported' });
+  }
+
+  if (_queryLock) {
+    return res.status(429).json({ error: 'Another query is already running — please try again' });
+  }
+  _queryLock = true;
+
+  const databases  = db.get('databases').value();
+  const allRecords = db.get('records').value();
+  const start      = Date.now();
+
+  try {
+    // Register each FluxDB database as an alasql in-memory table
+    databases.forEach(d => {
+      alasql.tables[d.name] = {
+        data: allRecords
+          .filter(r => r.databaseId === d.id)
+          .map(r => ({
+            id:        r.id,
+            createdBy: r.createdBy,
+            createdAt: r.createdAt,
+            updatedAt: r.updatedAt,
+            ...r.data,
+          })),
+      };
+    });
+
+    const results = alasql(sql);
+    const elapsed = Date.now() - start;
+
+    if (!Array.isArray(results)) {
+      return res.json({ columns: [], rows: [], rowCount: 0, elapsed });
+    }
+
+    const MAX_ROWS = 2000;
+    const truncated = results.length > MAX_ROWS;
+    const rows      = truncated ? results.slice(0, MAX_ROWS) : results;
+    const columns   = rows.length > 0 ? Object.keys(rows[0]) : [];
+
+    res.json({ columns, rows, rowCount: results.length, elapsed, truncated });
+
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  } finally {
+    databases.forEach(d => delete alasql.tables[d.name]);
+    _queryLock = false;
+  }
+});
 
 // ─── Serve SPA ────────────────────────────────────────────────────────────────
 app.get('/login', (req, res) => {

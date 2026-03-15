@@ -53,6 +53,14 @@
           <span class="nav-label">Activity Log</span>
         </button>
 
+        <button class="nav-btn" id="nav-query" data-view="query" title="Query Engine">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 6l3 4-3 4"/>
+            <path d="M11 14h6"/>
+          </svg>
+          <span class="nav-label">Query Engine</span>
+        </button>
+
         <button class="nav-btn" id="nav-apikeys" data-view="apikeys" title="API Keys" style="display:none">
           <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <circle cx="7.5" cy="10" r="4.5"/>
@@ -121,6 +129,43 @@
         <div id="apikey-list" class="table-wrap"></div>
       </div>
 
+      <!-- Query Engine View -->
+      <div id="view-query" class="view">
+        <div class="view-header">
+          <h2>Query Engine</h2>
+          <span class="query-badge">SQL</span>
+        </div>
+        <div class="query-layout">
+          <!-- Schema sidebar -->
+          <div class="schema-panel" id="query-schema">
+            <div class="schema-panel-hd">Tables</div>
+            <div class="schema-panel-body" id="schema-body">
+              <div class="schema-empty">No tables yet.<br>Create a database first.</div>
+            </div>
+          </div>
+          <!-- Editor + results -->
+          <div class="query-main">
+            <div class="query-editor-wrap">
+              <textarea id="query-input" class="query-editor" spellcheck="false"
+                placeholder="-- Write SQL against your FluxDB tables&#10;SELECT * FROM TableName WHERE field = 'value' ORDER BY field DESC LIMIT 50&#10;&#10;-- Aggregates&#10;SELECT createdBy, COUNT(*) AS cnt, AVG(price) AS avg_price&#10;FROM TableName GROUP BY createdBy"></textarea>
+              <div class="query-toolbar">
+                <button id="btn-run-query" class="btn btn-primary btn-sm">
+                  <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor" stroke="none" aria-hidden="true">
+                    <path d="M6 4l10 6-10 6V4z"/>
+                  </svg>
+                  Run
+                </button>
+                <span class="query-hint">Ctrl + Enter</span>
+                <button id="btn-clear-query" class="btn btn-ghost btn-sm" style="margin-left:auto">Clear</button>
+              </div>
+            </div>
+            <div id="query-results" class="query-results-wrap">
+              <div class="query-empty-state">Write a query above and press <strong>Run</strong> to see results.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Activity Log View (admin only) -->
       <div id="view-activity" class="view">
         <div class="view-header">
@@ -146,6 +191,6 @@
   <!-- Toast -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/app.js?v=3"></script>
+  <script src="/app.js?v=4"></script>
 </body>
 </html>
