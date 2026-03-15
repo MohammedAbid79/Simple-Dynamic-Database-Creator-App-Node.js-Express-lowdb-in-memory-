@@ -1,5 +1,6 @@
 'use strict';
 
+const http       = require('http');
 const express    = require('express');
 const session    = require('express-session');
 const bcrypt     = require('bcryptjs');
@@ -8,6 +9,7 @@ const { v4: uuidv4 } = require('uuid');
 const path       = require('path');
 const os         = require('os');
 const fs         = require('fs');
+const { WebSocketServer } = require('ws');
 const swaggerUi  = require('swagger-ui-express');
 const swaggerSpec = require('./swagger');
 const alasql     = require('alasql');
@@ -144,6 +146,30 @@ function fireWebhooks(event, payload) {
   const hooks = db.get('webhooks').filter({ event, active: true }).value();
   for (const hook of hooks) deliverWebhook(hook, event, payload).catch(() => {});
 }
+
+// ─── Real-Time WebSocket streaming ────────────────────────────────────────────
+// Each connected client is stored with its subscription list.
+// wsClients: Set of { ws, user, subscriptions: Set<databaseId|'*'> }
+const wsClients = new Set();
+
+// Called from every CRUD route to push an event to all subscribed clients
+function broadcastWS(event, databaseName, databaseId, data) {
+  const msg = JSON.stringify({
+    event, database: databaseName, databaseId, data,
+    timestamp: new Date().toISOString(),
+  });
+  for (const client of wsClients) {
+    if (client.ws.readyState !== 1 /* OPEN */) continue;
+    const { subscriptions } = client;
+    if (subscriptions.has('*') || subscriptions.has(databaseId)) {
+      client.ws.send(msg);
+    }
+  }
+}
+
+// Short-lived tokens so the browser can open a WS without sending credentials
+// over the WS handshake (which can't carry custom headers from the browser).
+const _streamTokens = new Map(); // token → { username, role, expires }
 
 // ─── Threat Detection Engine ───────────────────────────────────────────────────
 const _threatLog  = [];           // in-memory ring buffer (max 500 entries)
@@ -599,6 +625,37 @@ app.delete('/api/keys/:id', requireMember, (req, res) => {
   res.json({ message: 'API key revoked' });
 });
 
+// ─── Stream token endpoint ────────────────────────────────────────────────────
+// Returns a one-time token (60 s TTL) the browser exchanges for a WS connection.
+app.get('/api/stream/token', requireAuth, (req, res) => {
+  const user  = getAuthUser(req);
+  const token = crypto.randomBytes(20).toString('hex');
+  _streamTokens.set(token, {
+    username: user.username, role: user.role,
+    expires: Date.now() + 60_000,
+  });
+  // Prune expired tokens
+  for (const [k, v] of _streamTokens) {
+    if (v.expires < Date.now()) _streamTokens.delete(k);
+  }
+  res.json({ token });
+});
+
+// GET /api/stream/status — live connection count + subscriptions overview
+app.get('/api/stream/status', requireAuth, (req, res) => {
+  const connections = [];
+  for (const c of wsClients) {
+    if (c.ws.readyState !== 1) continue;
+    connections.push({
+      user:          c.user.username,
+      role:          c.user.role,
+      subscriptions: [...c.subscriptions],
+      since:         c.connectedAt,
+    });
+  }
+  res.json({ count: connections.length, connections });
+});
+
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 // GET /api/dashboard — aggregated stats for the admin dashboard
 app.get('/api/dashboard', requireAuth, (req, res) => {
@@ -671,6 +728,7 @@ app.post('/api/databases', requireMember, (req, res) => {
   db.get('databases').push(newDb).write();
   logActivity('create_db', user.username, name, `Created database "${name}" with ${fields.length} field(s)`);
   fireWebhooks('database.created', { database: newDb.name, databaseId: newDb.id, fields: newDb.fields, triggeredBy: user.username });
+  broadcastWS('database_created', newDb.name, newDb.id, { fields: newDb.fields, createdBy: user.username });
   res.status(201).json(newDb);
 });
 
@@ -722,6 +780,7 @@ app.delete('/api/databases/:id', requireAdmin, (req, res) => {
   db.get('records').remove({ databaseId: req.params.id }).write();
   logActivity('delete_db', user.username, dbToDelete.name, `Deleted database and ${recCount} record(s)`);
   fireWebhooks('database.deleted', { database: dbToDelete.name, databaseId: dbToDelete.id, triggeredBy: user.username });
+  broadcastWS('database_deleted', dbToDelete.name, dbToDelete.id, { deletedBy: user.username });
   res.json({ message: 'Database and all its records deleted' });
 });
 
@@ -752,6 +811,7 @@ app.post('/api/databases/:dbId/records', requireMember, (req, res) => {
   db.get('records').push(newRecord).write();
   logActivity('create_record', user.username, database.name, `Added record to "${database.name}"`);
   fireWebhooks('record.created', { database: database.name, databaseId: database.id, record: { id: newRecord.id, ...newRecord.data }, triggeredBy: user.username });
+  broadcastWS('record_added', database.name, database.id, { id: newRecord.id, ...newRecord.data, createdBy: user.username });
   res.status(201).json(newRecord);
 });
 
@@ -776,6 +836,7 @@ app.put('/api/databases/:dbId/records/:id', requireMember, (req, res) => {
   logActivity('update_record', user.username, database.name, `Updated record in "${database.name}"`);
   const updatedRec = db.get('records').find({ id: req.params.id }).value();
   fireWebhooks('record.updated', { database: database.name, databaseId: database.id, record: { id: updatedRec.id, ...updatedRec.data }, triggeredBy: user.username });
+  broadcastWS('record_updated', database.name, database.id, { id: updatedRec.id, ...updatedRec.data, updatedBy: user.username });
   res.json(updatedRec);
 });
 
@@ -795,6 +856,7 @@ app.delete('/api/databases/:dbId/records/:id', requireMember, (req, res) => {
     recDb ? recDb.name : req.params.dbId,
     `Deleted record from "${recDb ? recDb.name : req.params.dbId}"`);
   fireWebhooks('record.deleted', { database: recDb?.name, databaseId: req.params.dbId, recordId: req.params.id, triggeredBy: user.username });
+  broadcastWS('record_deleted', recDb?.name, req.params.dbId, { id: req.params.id, deletedBy: user.username });
   res.json({ message: 'Record deleted' });
 });
 
@@ -1374,6 +1436,7 @@ app.post('/api/v1/:slug', requireMember, resolveSlug, (req, res) => {
   db.get('records').push(newRecord).write();
   logActivity('create_record', user.username, database.name, `Added record to "${database.name}" via REST API`);
   fireWebhooks('record.created', { database: database.name, databaseId: database.id, record: { id: newRecord.id, ...newRecord.data }, triggeredBy: user.username });
+  broadcastWS('record_added', database.name, database.id, { id: newRecord.id, ...newRecord.data, createdBy: user.username });
   res.status(201).json(flatRecord(newRecord));
 });
 
@@ -1397,6 +1460,7 @@ app.put('/api/v1/:slug/:id', requireMember, resolveSlug, (req, res) => {
   logActivity('update_record', user.username, database.name, `Updated record in "${database.name}" via REST API`);
   const v1Updated = db.get('records').find({ id: req.params.id }).value();
   fireWebhooks('record.updated', { database: database.name, databaseId: database.id, record: { id: v1Updated.id, ...v1Updated.data }, triggeredBy: user.username });
+  broadcastWS('record_updated', database.name, database.id, { id: v1Updated.id, ...v1Updated.data, updatedBy: user.username });
   res.json(flatRecord(v1Updated));
 });
 
@@ -1415,6 +1479,7 @@ app.delete('/api/v1/:slug/:id', requireMember, resolveSlug, (req, res) => {
   db.get('records').remove({ id: req.params.id }).write();
   logActivity('delete_record', user.username, database.name, `Deleted record from "${database.name}" via REST API`);
   fireWebhooks('record.deleted', { database: database.name, databaseId: database.id, recordId: req.params.id, triggeredBy: user.username });
+  broadcastWS('record_deleted', database.name, database.id, { id: req.params.id, deletedBy: user.username });
   res.json({ message: 'Record deleted' });
 });
 
@@ -1799,13 +1864,89 @@ function getLocalIPs() {
   return ips;
 }
 
-app.listen(PORT, HOST, () => {
+// Wrap Express in a plain HTTP server so we can share the port with WebSockets
+const server = http.createServer(app);
+
+// ─── WebSocket server (same port, path /ws) ───────────────────────────────────
+const wss = new WebSocketServer({ server, path: '/ws' });
+
+wss.on('connection', (ws, req) => {
+  // Authenticate via one-time stream token passed as ?token=<tok>
+  const url   = new URL(req.url, 'http://localhost');
+  const token = url.searchParams.get('token') || '';
+  const meta  = _streamTokens.get(token);
+
+  if (!meta || meta.expires < Date.now()) {
+    ws.close(4001, 'Unauthorized');
+    return;
+  }
+  _streamTokens.delete(token); // one-time use
+
+  const client = {
+    ws,
+    user:          { username: meta.username, role: meta.role },
+    subscriptions: new Set(),
+    connectedAt:   new Date().toISOString(),
+  };
+  wsClients.add(client);
+  console.log(`[WS] ${meta.username} connected (${meta.role})`);
+
+  ws.send(JSON.stringify({
+    type: 'connected',
+    message: `Welcome ${meta.username}! Send {"type":"subscribe","databases":["*"]} to start.`,
+    timestamp: new Date().toISOString(),
+  }));
+
+  ws.on('message', raw => {
+    let msg;
+    try { msg = JSON.parse(raw); } catch { return; }
+
+    if (msg.type === 'ping') {
+      ws.send(JSON.stringify({ type: 'pong', timestamp: new Date().toISOString() }));
+      return;
+    }
+
+    if (msg.type === 'subscribe') {
+      const dbs = Array.isArray(msg.databases) ? msg.databases : ['*'];
+      dbs.forEach(d => client.subscriptions.add(d));
+      ws.send(JSON.stringify({
+        type: 'subscribed',
+        databases: [...client.subscriptions],
+        timestamp: new Date().toISOString(),
+      }));
+      console.log(`[WS] ${meta.username} subscribed to: ${dbs.join(', ')}`);
+      return;
+    }
+
+    if (msg.type === 'unsubscribe') {
+      const dbs = Array.isArray(msg.databases) ? msg.databases : [];
+      dbs.forEach(d => client.subscriptions.delete(d));
+      ws.send(JSON.stringify({
+        type: 'unsubscribed',
+        databases: dbs,
+        remaining: [...client.subscriptions],
+        timestamp: new Date().toISOString(),
+      }));
+      return;
+    }
+  });
+
+  ws.on('close', () => {
+    wsClients.delete(client);
+    console.log(`[WS] ${meta.username} disconnected`);
+  });
+
+  ws.on('error', () => wsClients.delete(client));
+});
+
+server.listen(PORT, HOST, () => {
   const ips = getLocalIPs();
   console.log('\n╔══════════════════════════════════════════════╗');
   console.log('║      Dynamic Database Creator  ✓  RUNNING  ║');
   console.log('╚══════════════════════════════════════════════╝');
   console.log(`\n  Local:    http://localhost:${PORT}`);
   ips.forEach(ip => console.log(`  Network:  http://${ip}:${PORT}`));
+  console.log(`  WebSocket: ws://localhost:${PORT}/ws`);
   console.log('\n  Admin  →  admin / admin123');
   console.log('  Guest  →  guest / guest123\n');
 });

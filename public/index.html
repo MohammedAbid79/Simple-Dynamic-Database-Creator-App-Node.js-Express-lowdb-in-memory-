@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FluxDB</title>
   <link rel="stylesheet" href="/fonts/inter.css" />
-  <link rel="stylesheet" href="/style.css?v=17" />
+  <link rel="stylesheet" href="/style.css?v=18" />
 </head>
 <body>
   <!-- ── App Shell ── -->
@@ -117,6 +117,17 @@
             <path d="M15.5 7.5v5"/>
           </svg>
           <span class="nav-label">API Keys</span>
+        </button>
+
+        <button class="nav-btn" id="nav-stream" data-view="stream" title="Live Stream" style="display:none">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="10" cy="10" r="2" fill="currentColor" stroke="none"/>
+            <path d="M6.5 6.5a5 5 0 0 0 0 7"/>
+            <path d="M13.5 6.5a5 5 0 0 1 0 7"/>
+            <path d="M3.5 3.5a9.5 9.5 0 0 0 0 13"/>
+            <path d="M16.5 3.5a9.5 9.5 0 0 1 0 13"/>
+          </svg>
+          <span class="nav-label">Live Stream</span>
         </button>
 
         <button class="nav-btn" id="nav-backups" data-view="backups" title="Backups" style="display:none">
@@ -231,6 +242,44 @@
           You can change a key's role at any time without re-issuing it.
         </p>
         <div id="apikey-list" class="table-wrap"></div>
+      </div>
+
+      <!-- Live Stream View -->
+      <div id="view-stream" class="view">
+        <div class="view-header">
+          <h2>Live Stream</h2>
+          <div style="display:flex;gap:8px;align-items:center">
+            <span id="ws-status-badge" class="ws-badge ws-badge-off">&#9679; Disconnected</span>
+            <button id="btn-stream-connect" class="btn btn-primary">&#9654; Connect</button>
+            <button id="btn-stream-disconnect" class="btn btn-outline" style="display:none">&#9632; Disconnect</button>
+            <button id="btn-stream-clear" class="btn btn-ghost btn-sm">&#10005; Clear</button>
+          </div>
+        </div>
+        <p class="apikey-hint">
+          Subscribe to real-time database events over WebSocket.
+          Use cases: <strong>live dashboards</strong> &nbsp;·&nbsp; <strong>real-time analytics</strong> &nbsp;·&nbsp; <strong>notifications</strong>.
+          Connect, choose databases to watch, then events appear below as they happen.
+        </p>
+
+        <!-- Subscription controls -->
+        <div id="stream-sub-panel" class="stream-sub-panel" style="display:none">
+          <div class="stream-sub-row">
+            <label class="stream-sub-label">Subscribe to</label>
+            <div id="stream-db-pills" class="stream-db-pills">
+              <button class="stream-pill active" data-dbid="*">All Databases</button>
+            </div>
+            <button id="btn-stream-apply-sub" class="btn btn-sm btn-outline">Apply</button>
+          </div>
+          <div class="stream-meta-row">
+            <span id="stream-conn-info" class="stream-conn-info"></span>
+            <span id="stream-event-count" class="stream-event-count">0 events</span>
+          </div>
+        </div>
+
+        <!-- Live feed -->
+        <div id="stream-feed" class="stream-feed">
+          <p class="empty-state">Connect to start receiving live events.</p>
+        </div>
       </div>
 
       <!-- Backups View (admin only) -->
@@ -367,6 +416,6 @@
   <!-- Toast -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/app.js?v=15"></script>
+  <script src="/app.js?v=16"></script>
 </body>
 </html>

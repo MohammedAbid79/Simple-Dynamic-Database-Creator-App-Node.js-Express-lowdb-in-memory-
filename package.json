@@ -23,6 +23,7 @@
     "express-session": "^1.19.0",
     "lowdb": "^1.0.0",
     "swagger-ui-express": "^5.0.1",
-    "uuid": "^13.0.0"
+    "uuid": "^13.0.0",
+    "ws": "^8.19.0"
   }
 }

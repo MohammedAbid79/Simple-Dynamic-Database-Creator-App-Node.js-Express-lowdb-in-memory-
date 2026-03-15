@@ -87,6 +87,7 @@ document.querySelectorAll('.nav-btn[data-view]').forEach(btn => {
     if (btn.dataset.view === 'webhooks')    loadWebhooks();
     if (btn.dataset.view === 'credentials') loadCredentials();
     if (btn.dataset.view === 'backups')     loadBackups();
+    if (btn.dataset.view === 'stream')      initStreamView();
   });
 });
 
@@ -140,6 +141,7 @@ async function bootApp() {
   document.getElementById('nav-apikeys').style.display         = (isAdmin || isMember) ? '' : 'none';
   document.getElementById('nav-webhooks').style.display        = (isAdmin || isMember) ? '' : 'none';
   document.getElementById('btn-create-webhook').style.display  = (isAdmin || isMember) ? '' : 'none';
+  document.getElementById('nav-stream').style.display          = (isAdmin || isMember) ? '' : 'none';
 
   showView('view-dashboard');
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -1061,6 +1063,180 @@ function revokeApiKey(id, name) {
         loadApiKeys();
       } catch (err) { toast(err.message, 'error'); }
     }, 'Revoke');
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   LIVE STREAM VIEW
+   ══════════════════════════════════════════════════════════════════════════════ */
+let _ws            = null;   // active WebSocket
+let _streamCount   = 0;      // total events received this session
+let _activePills   = new Set(['*']);  // current subscription set
+
+const STREAM_EVENT_META = {
+  record_added:      { label: 'Record Added',      cls: 'se-added'   },
+  record_updated:    { label: 'Record Updated',    cls: 'se-updated' },
+  record_deleted:    { label: 'Record Deleted',    cls: 'se-deleted' },
+  database_created:  { label: 'Database Created',  cls: 'se-dbcreate'},
+  database_deleted:  { label: 'Database Deleted',  cls: 'se-dbdelete'},
+};
+
+function initStreamView() {
+  // Populate the database pills from the current database list
+  api('GET', '/databases').then(dbs => {
+    const pillBox = document.getElementById('stream-db-pills');
+    // Keep the "All Databases" pill, rebuild the rest
+    pillBox.innerHTML = `<button class="stream-pill${_activePills.has('*') ? ' active' : ''}" data-dbid="*">All Databases</button>`;
+    dbs.forEach(d => {
+      const pill = document.createElement('button');
+      pill.className = 'stream-pill' + (_activePills.has(d.id) ? ' active' : '');
+      pill.dataset.dbid = d.id;
+      pill.textContent = d.name;
+      pillBox.appendChild(pill);
+    });
+    // Toggle active on click
+    pillBox.querySelectorAll('.stream-pill').forEach(p => {
+      p.onclick = () => {
+        if (p.dataset.dbid === '*') {
+          pillBox.querySelectorAll('.stream-pill').forEach(x => x.classList.remove('active'));
+          p.classList.add('active');
+          _activePills = new Set(['*']);
+        } else {
+          pillBox.querySelector('[data-dbid="*"]').classList.remove('active');
+          p.classList.toggle('active');
+          _activePills = new Set(
+            [...pillBox.querySelectorAll('.stream-pill.active')].map(x => x.dataset.dbid)
+          );
+          if (_activePills.size === 0) {
+            pillBox.querySelector('[data-dbid="*"]').classList.add('active');
+            _activePills = new Set(['*']);
+          }
+        }
+      };
+    });
+  }).catch(() => {});
+
+  // Wire up buttons (guard against re-registration)
+  document.getElementById('btn-stream-connect').onclick    = streamConnect;
+  document.getElementById('btn-stream-disconnect').onclick = streamDisconnect;
+  document.getElementById('btn-stream-clear').onclick      = () => {
+    document.getElementById('stream-feed').innerHTML = '<p class="empty-state">Feed cleared.</p>';
+    _streamCount = 0;
+    updateStreamCount();
+  };
+  document.getElementById('btn-stream-apply-sub').onclick = () => {
+    if (_ws && _ws.readyState === WebSocket.OPEN) {
+      const subs = [..._activePills];
+      _ws.send(JSON.stringify({ type: 'subscribe', databases: subs }));
+      toast(`Subscribed to: ${subs.join(', ')}`, 'success');
+    } else {
+      toast('Not connected', 'error');
+    }
+  };
+}
+
+function updateStreamCount() {
+  const el = document.getElementById('stream-event-count');
+  if (el) el.textContent = _streamCount === 1 ? '1 event' : `${_streamCount} events`;
+}
+
+function setWsBadge(state) {
+  const badge = document.getElementById('ws-status-badge');
+  const btnC  = document.getElementById('btn-stream-connect');
+  const btnD  = document.getElementById('btn-stream-disconnect');
+  if (!badge) return;
+  badge.className = `ws-badge ws-badge-${state}`;
+  if (state === 'on') {
+    badge.textContent = '● Connected';
+    btnC.style.display = 'none';
+    btnD.style.display = '';
+  } else if (state === 'connecting') {
+    badge.textContent = '◌ Connecting…';
+    btnC.style.display = 'none';
+    btnD.style.display = '';
+  } else {
+    badge.textContent = '● Disconnected';
+    btnC.style.display = '';
+    btnD.style.display = 'none';
+  }
+}
+
+function appendStreamEvent(msg) {
+  const feed = document.getElementById('stream-feed');
+  if (!feed) return;
+
+  // Remove placeholder
+  const empty = feed.querySelector('.empty-state');
+  if (empty) empty.remove();
+
+  const meta = STREAM_EVENT_META[msg.event] || { label: msg.event, cls: 'se-other' };
+  const time = new Date(msg.timestamp).toLocaleTimeString();
+
+  const row = document.createElement('div');
+  row.className = 'stream-event-row';
+  row.innerHTML = `
+    <span class="se-time">${esc(time)}</span>
+    <span class="se-badge ${meta.cls}">${meta.label}</span>
+    <span class="se-db">${esc(msg.database || '—')}</span>
+    <details class="se-details">
+      <summary>payload</summary>
+      <pre>${esc(JSON.stringify(msg.data, null, 2))}</pre>
+    </details>`;
+
+  // Prepend so newest is at top
+  feed.insertBefore(row, feed.firstChild);
+
+  // Cap feed at 200 rows to prevent memory bloat
+  while (feed.children.length > 200) feed.removeChild(feed.lastChild);
+
+  _streamCount++;
+  updateStreamCount();
+}
+
+async function streamConnect() {
+  if (_ws && _ws.readyState === WebSocket.OPEN) return;
+  setWsBadge('connecting');
+  try {
+    const { token } = await api('GET', '/stream/token');
+    const proto     = location.protocol === 'https:' ? 'wss' : 'ws';
+    _ws = new WebSocket(`${proto}://${location.host}/ws?token=${token}`);
+
+    _ws.onopen = () => {
+      setWsBadge('on');
+      document.getElementById('stream-sub-panel').style.display = '';
+      // Auto-subscribe to current pill selection
+      _ws.send(JSON.stringify({ type: 'subscribe', databases: [..._activePills] }));
+      const info = document.getElementById('stream-conn-info');
+      if (info) info.textContent = `Connected as ${currentUser.username}`;
+    };
+
+    _ws.onmessage = ({ data }) => {
+      let msg;
+      try { msg = JSON.parse(data); } catch { return; }
+      if (msg.type === 'connected' || msg.type === 'subscribed' ||
+          msg.type === 'unsubscribed' || msg.type === 'pong') return; // control frames
+      appendStreamEvent(msg);
+    };
+
+    _ws.onclose = () => {
+      setWsBadge('off');
+      _ws = null;
+    };
+
+    _ws.onerror = () => {
+      toast('WebSocket error — connection closed', 'error');
+      setWsBadge('off');
+      _ws = null;
+    };
+  } catch (err) {
+    toast('Could not connect: ' + err.message, 'error');
+    setWsBadge('off');
+  }
+}
+
+function streamDisconnect() {
+  if (_ws) { _ws.close(); _ws = null; }
+  setWsBadge('off');
+  document.getElementById('stream-sub-panel').style.display = 'none';
 }
 
 /* ── Utilities ─────────────────────────────────────────────────────────────── */
