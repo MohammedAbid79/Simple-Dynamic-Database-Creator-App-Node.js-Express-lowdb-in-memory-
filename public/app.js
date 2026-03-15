@@ -49,6 +49,7 @@ function openModal(title, bodyHTML, onSubmit, submitLabel = 'Save') {
 
 function closeModal() {
   document.getElementById('modal-overlay').classList.add('hidden');
+  document.getElementById('modal-box').classList.remove('modal-wide');
   const old = document.querySelector('.modal-footer');
   if (old) old.remove();
 }
@@ -129,10 +130,11 @@ async function bootApp() {
   if (isAdmin) setInterval(refreshThreatBadge, 30_000);
 
   // Admin + member (not guest)
-  document.getElementById('btn-create-db').style.display   = (isAdmin || isMember) ? '' : 'none';
-  document.getElementById('nav-apikeys').style.display      = (isAdmin || isMember) ? '' : 'none';
-  document.getElementById('nav-webhooks').style.display     = (isAdmin || isMember) ? '' : 'none';
-  document.getElementById('btn-create-webhook').style.display = (isAdmin || isMember) ? '' : 'none';
+  document.getElementById('btn-create-db').style.display      = (isAdmin || isMember) ? '' : 'none';
+  document.getElementById('btn-import-dataset').style.display = (isAdmin || isMember) ? '' : 'none';
+  document.getElementById('nav-apikeys').style.display         = (isAdmin || isMember) ? '' : 'none';
+  document.getElementById('nav-webhooks').style.display        = (isAdmin || isMember) ? '' : 'none';
+  document.getElementById('btn-create-webhook').style.display  = (isAdmin || isMember) ? '' : 'none';
 
   showView('view-databases');
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -1296,3 +1298,313 @@ async function viewDeliveries(id, event) {
        </table></div>`, null);
   } catch (err) { toast(err.message, 'error'); }
 }
+
+/* ── Dataset Import Wizard ──────────────────────────────────────────────────── */
+
+// ── Parsers ──────────────────────────────────────────────────────────────────
+
+function parseCSV(text) {
+  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(l => l.trim());
+  if (lines.length < 2) throw new Error('CSV must have at least a header row and one data row');
+
+  function splitCSVLine(line) {
+    const cells = [];
+    let cur = '', inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQ && line[i + 1] === '"') { cur += '"'; i++; }
+        else { inQ = !inQ; }
+      } else if (ch === ',' && !inQ) {
+        cells.push(cur); cur = '';
+      } else {
+        cur += ch;
+      }
+    }
+    cells.push(cur);
+    return cells;
+  }
+
+  const headers = splitCSVLine(lines[0]).map(h => sanitizeFieldName(h.trim()));
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cells = splitCSVLine(lines[i]);
+    const row = {};
+    headers.forEach((h, idx) => { row[h] = cells[idx] !== undefined ? cells[idx].trim() : ''; });
+    rows.push(row);
+  }
+  return { headers, rows };
+}
+
+function parseJSON(text) {
+  let parsed;
+  try { parsed = JSON.parse(text); } catch (e) { throw new Error('Invalid JSON: ' + e.message); }
+  if (Array.isArray(parsed)) {
+    if (parsed.length === 0) throw new Error('JSON array is empty');
+    const headers = [...new Set(parsed.flatMap(r => Object.keys(r)))].map(sanitizeFieldName);
+    const rows = parsed.map(r => {
+      const row = {};
+      headers.forEach(h => { row[h] = r[h] !== undefined ? r[h] : null; });
+      return row;
+    });
+    return { headers, rows };
+  }
+  if (typeof parsed === 'object' && parsed !== null) {
+    const vals = Object.values(parsed);
+    if (Array.isArray(vals[0])) {
+      // { col: [v1,v2,...] } column-oriented format
+      const headers = Object.keys(parsed).map(sanitizeFieldName);
+      const len = vals[0].length;
+      const rows = [];
+      for (let i = 0; i < len; i++) {
+        const row = {};
+        headers.forEach((h, hi) => { row[h] = vals[hi][i] !== undefined ? vals[hi][i] : null; });
+        rows.push(row);
+      }
+      return { headers, rows };
+    }
+  }
+  throw new Error('JSON must be an array of objects (or column-oriented object)');
+}
+
+function sanitizeFieldName(name) {
+  return String(name).replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '').replace(/^_+|_+$/g, '') || 'field';
+}
+
+// ── Type inference ────────────────────────────────────────────────────────────
+
+function inferType(values) {
+  const nonEmpty = values.filter(v => v !== null && v !== undefined && v !== '');
+  if (nonEmpty.length === 0) return 'string';
+
+  const boolSet = new Set(['true', 'false', '1', '0', 'yes', 'no']);
+  if (nonEmpty.every(v => boolSet.has(String(v).toLowerCase()))) return 'boolean';
+
+  if (nonEmpty.every(v => !isNaN(Number(v)) && String(v).trim() !== '')) return 'number';
+
+  const dateRe = /^\d{4}-\d{2}-\d{2}(T[\d:.Z+-]*)?$|^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/;
+  if (nonEmpty.every(v => dateRe.test(String(v).trim()))) return 'date';
+
+  return 'string';
+}
+
+function inferFields(headers, rows) {
+  return headers.map(h => {
+    const vals = rows.map(r => r[h]);
+    return { name: h, type: inferType(vals) };
+  });
+}
+
+// ── State for import wizard ───────────────────────────────────────────────────
+
+let _importParsed = null; // { headers, rows, fields }
+
+// ── Step 1: drop zone ─────────────────────────────────────────────────────────
+
+function openImportWizard() {
+  _importParsed = null;
+  document.getElementById('modal-box').classList.add('modal-wide');
+  openModal('Import Dataset — Step 1: Upload File', `
+    <div class="import-dropzone" id="import-drop">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" width="48" height="48" aria-hidden="true">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="17 8 12 3 7 8"/>
+        <line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+      <p class="import-drop-label">Drag &amp; drop a <strong>CSV</strong> or <strong>JSON</strong> file here</p>
+      <p class="import-drop-sub">or</p>
+      <label class="btn btn-outline import-file-btn" for="import-file-input">Browse file</label>
+      <input type="file" id="import-file-input" accept=".csv,.json,text/csv,application/json" style="display:none" />
+      <p class="import-drop-hint">Max 5 MB &nbsp;·&nbsp; Max 5,000 rows &nbsp;·&nbsp; CSV or JSON</p>
+    </div>
+    <div id="import-step1-error" class="import-error hidden"></div>
+  `, null);
+
+  const dropzone = document.getElementById('import-drop');
+  const fileInput = document.getElementById('import-file-input');
+
+  dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('import-drop-over'); });
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('import-drop-over'));
+  dropzone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropzone.classList.remove('import-drop-over');
+    const file = e.dataTransfer.files[0];
+    if (file) handleImportFile(file);
+  });
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files[0]) handleImportFile(fileInput.files[0]);
+  });
+}
+
+function handleImportFile(file) {
+  const errEl = document.getElementById('import-step1-error');
+  errEl.classList.add('hidden');
+
+  if (file.size > 5 * 1024 * 1024) {
+    errEl.textContent = 'File is too large (max 5 MB)';
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  const ext = file.name.split('.').pop().toLowerCase();
+  if (!['csv', 'json'].includes(ext)) {
+    errEl.textContent = 'Only .csv and .json files are supported';
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const text = e.target.result;
+      const { headers, rows } = ext === 'csv' ? parseCSV(text) : parseJSON(text);
+      if (rows.length > 5000) {
+        errEl.textContent = `Too many rows (${rows.length}). Import limit is 5,000.`;
+        errEl.classList.remove('hidden');
+        return;
+      }
+      const fields = inferFields(headers, rows);
+      _importParsed = { filename: file.name, headers, rows, fields };
+      showImportStep2();
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.classList.remove('hidden');
+    }
+  };
+  reader.onerror = () => {
+    errEl.textContent = 'Failed to read file';
+    errEl.classList.remove('hidden');
+  };
+  reader.readAsText(file);
+}
+
+// ── Step 2: configure + preview ───────────────────────────────────────────────
+
+function showImportStep2() {
+  const { filename, fields, rows } = _importParsed;
+  const defaultName = filename.replace(/\.(csv|json)$/i, '').replace(/[^a-zA-Z0-9 _-]/g, '').trim() || 'Imported';
+
+  const typeOpts = ['string', 'number', 'boolean', 'date']
+    .map(t => `<option value="${t}">${t}</option>`).join('');
+
+  const fieldRows = fields.map((f, i) => `
+    <tr>
+      <td><input class="import-field-name" data-idx="${i}" value="${esc(f.name)}" style="width:100%" /></td>
+      <td>
+        <select class="import-field-type" data-idx="${i}">
+          ${['string','number','boolean','date'].map(t =>
+            `<option value="${t}"${f.type === t ? ' selected' : ''}>${t}</option>`).join('')}
+        </select>
+      </td>
+    </tr>`).join('');
+
+  // Preview: first 5 rows
+  const previewHeaders = fields.map(f => `<th>${esc(f.name)}</th>`).join('');
+  const previewRows = rows.slice(0, 5).map(r =>
+    `<tr>${fields.map(f => `<td>${esc(String(r[f.name] ?? ''))}</td>`).join('')}</tr>`
+  ).join('');
+
+  document.getElementById('modal-title').textContent = 'Import Dataset — Step 2: Configure';
+  const body = document.getElementById('modal-body');
+  body.innerHTML = `
+    <div class="import-step2">
+      <div class="import-section">
+        <label class="import-label">Database Name</label>
+        <input id="import-db-name" class="import-name-input" value="${esc(defaultName)}" placeholder="Dataset name" />
+      </div>
+
+      <div class="import-section">
+        <label class="import-label">Field Configuration <span class="import-hint">(${fields.length} columns · ${rows.length} rows)</span></label>
+        <div class="import-field-table-wrap">
+          <table class="import-field-table">
+            <thead><tr><th>Field Name</th><th>Type</th></tr></thead>
+            <tbody>${fieldRows}</tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="import-section">
+        <label class="import-label">Data Preview <span class="import-hint">(first 5 rows)</span></label>
+        <div class="import-preview-wrap">
+          <table class="import-preview-table">
+            <thead><tr>${previewHeaders}</tr></thead>
+            <tbody>${previewRows}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Update footer
+  const oldFooter = document.querySelector('.modal-footer');
+  if (oldFooter) oldFooter.remove();
+  const footer = document.createElement('div');
+  footer.className = 'modal-footer';
+  footer.innerHTML = `
+    <button class="btn btn-outline" id="modal-cancel">Cancel</button>
+    <button class="btn btn-ghost" id="import-back-btn">&#8592; Back</button>
+    <button class="btn btn-primary" id="import-submit-btn">&#8679; Import ${rows.length} Rows</button>`;
+  document.getElementById('modal-box').appendChild(footer);
+
+  document.getElementById('modal-cancel').onclick = closeModal;
+  document.getElementById('import-back-btn').onclick = () => {
+    _importParsed = null;
+    openImportWizard();
+  };
+  document.getElementById('import-submit-btn').onclick = doImport;
+}
+
+// ── Submit import ─────────────────────────────────────────────────────────────
+
+async function doImport() {
+  const nameEl = document.getElementById('import-db-name');
+  const name = nameEl ? nameEl.value.trim() : '';
+  if (!name) { toast('Database name is required', 'error'); return; }
+
+  // Collect updated field names + types from the form
+  const nameInputs = document.querySelectorAll('.import-field-name');
+  const typeSelects = document.querySelectorAll('.import-field-type');
+  const fields = [];
+  for (let i = 0; i < nameInputs.length; i++) {
+    const fname = nameInputs[i].value.trim();
+    const ftype = typeSelects[i].value;
+    if (!fname) { toast('All field names are required', 'error'); return; }
+    fields.push({ name: fname, type: ftype });
+  }
+
+  // Remap rows with updated field names
+  const oldFields = _importParsed.fields;
+  const rows = _importParsed.rows.map(row => {
+    const newRow = {};
+    fields.forEach((f, i) => { newRow[f.name] = row[oldFields[i].name]; });
+    return newRow;
+  });
+
+  const btn = document.getElementById('import-submit-btn');
+  btn.disabled = true;
+  btn.textContent = 'Importing…';
+
+  try {
+    const result = await fetch('/api/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, fields, rows }),
+    });
+    const data = await result.json().catch(() => ({}));
+    if (!result.ok) throw new Error(data.error || 'Import failed');
+
+    closeModal();
+    document.getElementById('modal-box').classList.remove('modal-wide');
+    toast(`Imported "${name}": ${data.imported} rows`, 'success');
+    loadDatabases();
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = `↑ Import ${rows.length} Rows`;
+    toast(err.message, 'error');
+  }
+}
+
+// ── Wire up the button ────────────────────────────────────────────────────────
+
+document.getElementById('btn-import-dataset').onclick = openImportWizard;
+

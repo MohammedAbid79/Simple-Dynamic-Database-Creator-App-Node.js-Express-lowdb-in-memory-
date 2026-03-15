@@ -312,8 +312,8 @@ function threatDetection(req, res, next) {
 
 const app = express();
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Self-hosted fonts (no internet required)
@@ -1117,6 +1117,108 @@ app.delete('/api/v1/:slug/:id', requireMember, resolveSlug, (req, res) => {
   logActivity('delete_record', user.username, database.name, `Deleted record from "${database.name}" via REST API`);
   fireWebhooks('record.deleted', { database: database.name, databaseId: database.id, recordId: req.params.id, triggeredBy: user.username });
   res.json({ message: 'Record deleted' });
+});
+
+// ─── Dataset Import ───────────────────────────────────────────────────────────
+// POST /api/import — create a database + bulk-insert records from an uploaded dataset
+app.post('/api/import', requireMember, (req, res) => {
+  const { name, fields, rows } = req.body;
+
+  // Validate name
+  if (!name || typeof name !== 'string' || !name.trim()) {
+    return res.status(400).json({ error: 'Database name is required' });
+  }
+  const trimmedName = name.trim();
+
+  // Validate fields
+  if (!Array.isArray(fields) || fields.length === 0) {
+    return res.status(400).json({ error: 'At least one field is required' });
+  }
+  for (const f of fields) {
+    if (!f.name || !['string', 'number', 'boolean', 'date'].includes(f.type)) {
+      return res.status(400).json({
+        error: `Invalid field: "${f.name}". Type must be string|number|boolean|date`,
+      });
+    }
+  }
+
+  // Validate rows
+  if (!Array.isArray(rows)) {
+    return res.status(400).json({ error: 'rows must be an array' });
+  }
+  if (rows.length > 5000) {
+    return res.status(400).json({ error: 'Import limit is 5,000 rows' });
+  }
+
+  // Check name uniqueness
+  if (db.get('databases').find({ name: trimmedName }).value()) {
+    return res.status(409).json({ error: `Database "${trimmedName}" already exists` });
+  }
+
+  const user  = getAuthUser(req);
+  const newDb = {
+    id:        uuidv4(),
+    name:      trimmedName,
+    fields,
+    createdBy: user.username,
+    createdAt: new Date().toISOString(),
+  };
+  db.get('databases').push(newDb).write();
+
+  // Bulk-insert records, coercing types
+  const fieldMap = {};
+  for (const f of fields) fieldMap[f.name] = f.type;
+
+  let imported = 0;
+  let skipped  = 0;
+  const newRecords = [];
+
+  for (const row of rows) {
+    if (typeof row !== 'object' || row === null) { skipped++; continue; }
+    const data = {};
+    for (const f of fields) {
+      let val = row[f.name];
+      if (val === undefined || val === null || val === '') {
+        data[f.name] = null;
+        continue;
+      }
+      if (f.type === 'number') {
+        const n = Number(val);
+        data[f.name] = isNaN(n) ? null : n;
+      } else if (f.type === 'boolean') {
+        data[f.name] = val === true || val === 'true' || val === '1' || val === 1;
+      } else if (f.type === 'date') {
+        data[f.name] = String(val);
+      } else {
+        data[f.name] = String(val);
+      }
+    }
+    newRecords.push({
+      id:         uuidv4(),
+      databaseId: newDb.id,
+      data,
+      createdBy:  user.username,
+      createdAt:  new Date().toISOString(),
+      updatedAt:  new Date().toISOString(),
+    });
+    imported++;
+  }
+
+  if (newRecords.length > 0) {
+    const existing = db.get('records').value();
+    db.set('records', [...existing, ...newRecords]).write();
+  }
+
+  logActivity('import_dataset', user.username, trimmedName,
+    `Imported dataset "${trimmedName}" with ${fields.length} field(s) and ${imported} record(s)`);
+  fireWebhooks('database.created', {
+    database:    newDb.name,
+    databaseId:  newDb.id,
+    fields:      newDb.fields,
+    triggeredBy: user.username,
+  });
+
+  res.status(201).json({ database: newDb, imported, skipped });
 });
 
 // ─── Serve SPA ────────────────────────────────────────────────────────────────
