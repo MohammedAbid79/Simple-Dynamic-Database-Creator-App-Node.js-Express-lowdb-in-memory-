@@ -18,11 +18,11 @@ const alasql     = require('alasql');
 const BACKUP_DIR = path.join(__dirname, 'backup');
 if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
 
-// ─── In-Memory lowdb setup ────────────────────────────────────────────────────
-const low    = require('lowdb');
-const Memory = require('lowdb/adapters/Memory');
+// ─── Persistent lowdb setup ───────────────────────────────────────────────────
+const low      = require('lowdb');
+const FileSync = require('lowdb/adapters/FileSync');
 
-const db = low(new Memory());
+const db = low(new FileSync(path.join(__dirname, 'db.json')));
 
 db.defaults({
   users: [
