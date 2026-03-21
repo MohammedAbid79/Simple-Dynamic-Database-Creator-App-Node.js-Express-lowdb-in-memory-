@@ -1878,9 +1878,10 @@ function renderApiCard(api) {
             <button class="btn btn-sm btn-ghost" onclick="copyText(${JSON.stringify(baseUrl)})" title="Copy base URL">&#128203;</button>
           </div>
         </div>
-        <div class="api-card-meta">
+        <div class="api-card-meta" style="display:flex;align-items:center;gap:8px;">
           <span class="record-count-badge">${api.recordCount} record${api.recordCount !== 1 ? 's' : ''}</span>
           <span class="record-count-badge">${api.fields.length} field${api.fields.length !== 1 ? 's' : ''}</span>
+          <button class="btn btn-sm btn-primary" onclick="openApiDocs(${JSON.stringify(api)})" style="margin-left:4px;">&#128196; Docs</button>
         </div>
       </div>
       <div class="api-field-chips">${fieldChips}</div>
@@ -3161,3 +3162,380 @@ function openTemplateMarketplace() {
 }
 
 document.getElementById('btn-from-template').onclick = openTemplateMarketplace;
+
+// ─── Interactive API Docs Overlay ────────────────────────────────────────────
+
+const DOCS_METHOD_META = {
+  GET_list:   { color: '#2dce89', bg: 'rgba(45,206,137,.12)', label: 'GET',    title: 'List all records',   hasBody: false, hasId: false },
+  GET_one:    { color: '#2dce89', bg: 'rgba(45,206,137,.12)', label: 'GET',    title: 'Get record by ID',   hasBody: false, hasId: true  },
+  POST:       { color: '#6574ff', bg: 'rgba(101,116,255,.12)',label: 'POST',   title: 'Create a record',    hasBody: true,  hasId: false },
+  PUT:        { color: '#ffa94d', bg: 'rgba(255,169,77,.12)', label: 'PUT',    title: 'Update a record',    hasBody: true,  hasId: true  },
+  DELETE:     { color: '#f06565', bg: 'rgba(240,101,101,.12)',label: 'DELETE', title: 'Delete a record',    hasBody: false, hasId: true  },
+};
+
+let _docsApi = null;  // the current database api object shown in docs
+
+function openApiDocs(apiObj) {
+  _docsApi = apiObj;
+  const baseUrl = `${location.origin}/api/v1/${apiObj.slug}`;
+
+  document.getElementById('apidoc-title').textContent = `${apiObj.name} API`;
+  document.getElementById('apidoc-baseurl').textContent = baseUrl;
+
+  // Schema chips
+  document.getElementById('apidoc-schema').innerHTML = apiObj.fields.map(f => `
+    <div style="background:#141728;border:1px solid #252a3d;border-radius:8px;padding:8px 14px;display:flex;align-items:center;gap:10px;">
+      <span style="font-weight:600;color:#dde2f2;font-size:.85rem;">${esc(f.name)}</span>
+      <span style="background:rgba(99,102,241,.15);color:#818cf8;border:1px solid rgba(99,102,241,.25);padding:1px 7px;border-radius:10px;font-size:.7rem;">${esc(f.type)}</span>
+      ${f.required ? '<span style="color:#f87171;font-size:.7rem;font-weight:600;">required</span>' : '<span style="color:#6b7280;font-size:.7rem;">optional</span>'}
+    </div>`).join('');
+
+  // Build endpoint sections
+  const exBody = buildExampleBody(apiObj.fields);
+  const endpoints = [
+    { key: 'GET_list',  method: 'GET',    url: baseUrl,       paramNote: '?limit=50&offset=0' },
+    { key: 'GET_one',   method: 'GET',    url: baseUrl + '/:id' },
+    { key: 'POST',      method: 'POST',   url: baseUrl },
+    { key: 'PUT',       method: 'PUT',    url: baseUrl + '/:id' },
+    { key: 'DELETE',    method: 'DELETE', url: baseUrl + '/:id' },
+  ];
+
+  document.getElementById('apidoc-endpoints').innerHTML = endpoints.map((ep, i) => {
+    const meta = DOCS_METHOD_META[ep.key];
+    const epId = `ep-${i}`;
+    return buildEndpointSection(ep, meta, epId, exBody, apiObj.fields);
+  }).join('');
+
+  document.getElementById('apidoc-overlay').style.display = '';
+  document.body.style.overflow = 'hidden';
+
+  // Pre-fill API key if user has one stored in the page
+  tryPrefillApiKey();
+}
+
+function closeApiDocs() {
+  document.getElementById('apidoc-overlay').style.display = 'none';
+  document.body.style.overflow = '';
+  _docsApi = null;
+}
+
+function toggleApiKeyVis() {
+  const inp = document.getElementById('apidoc-apikey');
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+}
+
+function tryPrefillApiKey() {
+  // If the user already typed a key in a previous session this page load, reuse it
+  const saved = sessionStorage.getItem('apidoc_key');
+  if (saved) document.getElementById('apidoc-apikey').value = saved;
+}
+
+function buildExampleBody(fields) {
+  const obj = {};
+  for (const f of fields) {
+    obj[f.name] = f.type === 'number' ? 0
+                : f.type === 'boolean' ? false
+                : f.type === 'date'    ? new Date().toISOString().slice(0, 10)
+                : 'example';
+  }
+  return JSON.stringify({ data: obj }, null, 2);
+}
+
+function buildEndpointSection(ep, meta, epId, exBody, fields) {
+  const displayUrl = ep.url + (ep.paramNote ? ep.paramNote : '');
+  const curlLines  = buildCurl(ep, meta, exBody);
+
+  const paramsHtml = ep.key === 'GET_list' ? `
+    <div class="docs-params">
+      <div class="docs-params-title">Query Parameters</div>
+      <div class="docs-param-row"><code>limit</code><span>number</span><span style="color:#6b7280">Max records to return (default 100)</span></div>
+      <div class="docs-param-row"><code>offset</code><span>number</span><span style="color:#6b7280">Skip N records for pagination</span></div>
+    </div>` : '';
+
+  const idParamHtml = meta.hasId ? `
+    <div class="docs-params">
+      <div class="docs-params-title">Path Parameter</div>
+      <div class="docs-param-row"><code>:id</code><span>string</span><span style="color:#6b7280">UUID of the record</span></div>
+    </div>` : '';
+
+  const bodyHtml = meta.hasBody ? `
+    <div class="docs-params">
+      <div class="docs-params-title">Request Body <span style="color:#6b7280;font-weight:400">(application/json)</span></div>
+      ${fields.map(f => `
+        <div class="docs-param-row">
+          <code>${esc(f.name)}</code>
+          <span>${esc(f.type)}</span>
+          <span style="color:${f.required ? '#f87171' : '#6b7280'}">${f.required ? 'required' : 'optional'}</span>
+        </div>`).join('')}
+    </div>` : '';
+
+  return `
+    <div class="docs-ep-section" id="${epId}-section">
+      <div class="docs-ep-header" onclick="toggleDocsSection('${epId}')">
+        <div style="display:flex;align-items:center;gap:12px;min-width:0;">
+          <span class="docs-method-badge" style="background:${meta.bg};color:${meta.color};border-color:${meta.color}44;">${meta.label}</span>
+          <code class="docs-ep-path">${esc(ep.url)}</code>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
+          <span style="color:#9ca3af;font-size:.82rem;">${esc(meta.title)}</span>
+          <span class="docs-chevron" id="${epId}-chevron">▶</span>
+        </div>
+      </div>
+
+      <div class="docs-ep-body hidden" id="${epId}-body">
+        ${paramsHtml}${idParamHtml}${bodyHtml}
+
+        <!-- cURL example -->
+        <div class="docs-params" style="margin-top:0;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+            <div class="docs-params-title" style="margin-bottom:0;">cURL Example</div>
+            <button class="docs-copy-btn" onclick="copyText(${JSON.stringify(curlLines)})">Copy</button>
+          </div>
+          <pre class="docs-curl-pre">${esc(curlLines)}</pre>
+        </div>
+
+        <!-- Try It panel -->
+        <div class="docs-tryit-wrap">
+          <div style="font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#6b7280;margin-bottom:10px;">Try It</div>
+          ${meta.hasId ? `<div style="margin-bottom:10px;">
+            <label style="font-size:.78rem;color:#9ca3af;display:block;margin-bottom:4px;">Record ID</label>
+            <input id="${epId}-record-id" type="text" placeholder="Paste a record UUID…"
+              style="width:100%;background:#0c0e1a;border:1px solid #252a3d;color:#dde2f2;padding:7px 10px;border-radius:7px;font-size:.82rem;font-family:monospace;outline:none;">
+          </div>` : ''}
+          ${ep.key === 'GET_list' ? `<div style="display:flex;gap:8px;margin-bottom:10px;">
+            <div style="flex:1">
+              <label style="font-size:.78rem;color:#9ca3af;display:block;margin-bottom:4px;">limit</label>
+              <input id="${epId}-limit" type="number" value="50" min="1" max="500"
+                style="width:100%;background:#0c0e1a;border:1px solid #252a3d;color:#dde2f2;padding:7px 10px;border-radius:7px;font-size:.82rem;outline:none;">
+            </div>
+            <div style="flex:1">
+              <label style="font-size:.78rem;color:#9ca3af;display:block;margin-bottom:4px;">offset</label>
+              <input id="${epId}-offset" type="number" value="0" min="0"
+                style="width:100%;background:#0c0e1a;border:1px solid #252a3d;color:#dde2f2;padding:7px 10px;border-radius:7px;font-size:.82rem;outline:none;">
+            </div>
+          </div>` : ''}
+          ${meta.hasBody ? `<div style="margin-bottom:10px;">
+            <label style="font-size:.78rem;color:#9ca3af;display:block;margin-bottom:4px;">Request body (JSON)</label>
+            <textarea id="${epId}-body" rows="6" spellcheck="false"
+              style="width:100%;background:#0c0e1a;border:1px solid #252a3d;color:#dde2f2;padding:8px 10px;border-radius:7px;font-size:.8rem;font-family:monospace;resize:vertical;outline:none;">${esc(exBody)}</textarea>
+          </div>` : ''}
+          <div style="display:flex;align-items:center;gap:10px;">
+            <button onclick="sendTryIt('${epId}','${ep.key}','${ep.url}')"
+              style="background:#6366f1;color:#fff;border:none;padding:8px 20px;border-radius:8px;font-size:.85rem;font-weight:500;cursor:pointer;">
+              ▶ Send
+            </button>
+            <span id="${epId}-status" style="font-size:.8rem;"></span>
+          </div>
+          <div id="${epId}-response" style="display:none;margin-top:12px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+              <div style="font-size:.75rem;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:.08em;">Response</div>
+              <button class="docs-copy-btn" onclick="copyResponseJson('${epId}')">Copy</button>
+            </div>
+            <pre id="${epId}-response-body" class="docs-curl-pre" style="max-height:320px;overflow-y:auto;"></pre>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function buildCurl(ep, meta, exBody) {
+  const apiKey = 'YOUR_API_KEY';
+  const url    = ep.url.replace('/:id', '/RECORD_ID');
+  if (meta.label === 'GET' && !meta.hasId) {
+    return `curl -H "X-API-Key: ${apiKey}" \\\n  "${url}?limit=50&offset=0"`;
+  }
+  if (meta.label === 'GET') {
+    return `curl -H "X-API-Key: ${apiKey}" \\\n  "${url}"`;
+  }
+  if (meta.hasBody) {
+    return `curl -X ${meta.label} \\\n  -H "X-API-Key: ${apiKey}" \\\n  -H "Content-Type: application/json" \\\n  -d '${exBody.replace(/'/g, "\\'")}' \\\n  "${url}"`;
+  }
+  return `curl -X ${meta.label} \\\n  -H "X-API-Key: ${apiKey}" \\\n  "${url}"`;
+}
+
+function toggleDocsSection(epId) {
+  const body    = document.getElementById(`${epId}-body`);
+  const chevron = document.getElementById(`${epId}-chevron`);
+  const hidden  = body.classList.toggle('hidden');
+  chevron.textContent = hidden ? '▶' : '▼';
+}
+
+async function sendTryIt(epId, epKey, urlTemplate) {
+  const apiKeyEl = document.getElementById('apidoc-apikey');
+  const apiKey   = apiKeyEl.value.trim();
+  if (!apiKey) { toast('Paste your API key in the bar above first', 'error'); return; }
+
+  sessionStorage.setItem('apidoc_key', apiKey);
+
+  const statusEl   = document.getElementById(`${epId}-status`);
+  const responseEl = document.getElementById(`${epId}-response`);
+  const bodyEl     = document.getElementById(`${epId}-response-body`);
+
+  // Build URL
+  let url = urlTemplate;
+  if (DOCS_METHOD_META[epKey].hasId) {
+    const recId = (document.getElementById(`${epId}-record-id`) || {}).value?.trim();
+    if (!recId) { toast('Enter a Record ID', 'error'); return; }
+    url = url.replace('/:id', `/${recId}`);
+  }
+  if (epKey === 'GET_list') {
+    const limit  = document.getElementById(`${epId}-limit`)?.value  || 50;
+    const offset = document.getElementById(`${epId}-offset`)?.value || 0;
+    url += `?limit=${limit}&offset=${offset}`;
+  }
+
+  // Build fetch options
+  const opts = { headers: { 'X-API-Key': apiKey } };
+  const meta = DOCS_METHOD_META[epKey];
+  opts.method = meta.label;
+
+  if (meta.hasBody) {
+    const raw = document.getElementById(`${epId}-body`)?.value || '{}';
+    let parsed;
+    try { parsed = JSON.parse(raw); }
+    catch (e) { toast('Request body is not valid JSON', 'error'); return; }
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(parsed);
+  }
+
+  statusEl.textContent = 'Sending…';
+  statusEl.style.color = '#9ca3af';
+  responseEl.style.display = 'none';
+
+  const t0 = Date.now();
+  try {
+    const res   = await fetch(url, opts);
+    const ms    = Date.now() - t0;
+    const text  = await res.text();
+    let pretty;
+    try { pretty = JSON.stringify(JSON.parse(text), null, 2); }
+    catch { pretty = text; }
+
+    const ok = res.status < 400;
+    statusEl.textContent = `${res.status} ${res.statusText}  •  ${ms}ms`;
+    statusEl.style.color = ok ? '#2dce89' : '#f06565';
+    bodyEl.textContent   = pretty;
+    bodyEl.style.color   = ok ? '#a5f3c4' : '#fca5a5';
+    responseEl.style.display = '';
+    responseEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (err) {
+    statusEl.textContent = 'Network error: ' + err.message;
+    statusEl.style.color = '#f06565';
+  }
+}
+
+function copyResponseJson(epId) {
+  const text = document.getElementById(`${epId}-response-body`)?.textContent || '';
+  navigator.clipboard.writeText(text).then(() => toast('Copied!', 'success'));
+}
+
+// Inject docs overlay styles once
+(function injectDocsStyles() {
+  const style = document.createElement('style');
+  style.textContent = `
+    .docs-ep-section {
+      border: 1px solid #252a3d;
+      border-radius: 10px;
+      margin-bottom: 10px;
+      overflow: hidden;
+    }
+    .docs-ep-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 18px;
+      cursor: pointer;
+      gap: 12px;
+      transition: background .15s;
+    }
+    .docs-ep-header:hover { background: rgba(255,255,255,.025); }
+    .docs-ep-body {
+      padding: 0 18px 18px;
+      border-top: 1px solid #252a3d;
+    }
+    .docs-ep-body.hidden { display: none; }
+    .docs-method-badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 6px;
+      font-size: .72rem;
+      font-weight: 700;
+      letter-spacing: .05em;
+      border: 1px solid transparent;
+      flex-shrink: 0;
+      min-width: 56px;
+      text-align: center;
+    }
+    .docs-ep-path {
+      font-size: .82rem;
+      color: #dde2f2;
+      word-break: break-all;
+    }
+    .docs-chevron {
+      color: #6b7280;
+      font-size: .7rem;
+      transition: transform .15s;
+    }
+    .docs-params {
+      background: #0c0e1a;
+      border: 1px solid #252a3d;
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin-top: 14px;
+    }
+    .docs-params-title {
+      font-size: .72rem;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: #6b7280;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .docs-param-row {
+      display: grid;
+      grid-template-columns: 140px 80px 1fr;
+      gap: 8px;
+      padding: 5px 0;
+      border-bottom: 1px solid #1a1e2e;
+      font-size: .82rem;
+      align-items: center;
+    }
+    .docs-param-row:last-child { border-bottom: none; }
+    .docs-param-row code { color: #a5b4fc; font-family: monospace; }
+    .docs-param-row span:nth-child(2) { color: #818cf8; font-size: .75rem; }
+    .docs-curl-pre {
+      background: #0c0e1a;
+      border: 1px solid #252a3d;
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: .78rem;
+      font-family: monospace;
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: #a5f3c4;
+      margin: 0;
+    }
+    .docs-copy-btn {
+      background: none;
+      border: 1px solid #252a3d;
+      color: #9ca3af;
+      padding: 3px 10px;
+      border-radius: 6px;
+      font-size: .72rem;
+      cursor: pointer;
+    }
+    .docs-copy-btn:hover { border-color: #6366f1; color: #6366f1; }
+    .docs-tryit-wrap {
+      margin-top: 14px;
+      background: #141728;
+      border: 1px solid #252a3d;
+      border-radius: 8px;
+      padding: 14px;
+    }
+    @media (max-width: 600px) {
+      .docs-param-row { grid-template-columns: 1fr 1fr; }
+      .docs-param-row span:nth-child(3) { grid-column: 1/-1; }
+    }
+  `;
+  document.head.appendChild(style);
+}());
