@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FluxDB – Shared Database</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #0c0e1a;
+    --surface:  #141728;
+    --border:   #252a3d;
+    --accent:   #6366f1;
+    --accent2:  #8b5cf6;
+    --text:     #dde2f2;
+    --muted:    #6b7280;
+    --success:  #22c55e;
+    --warning:  #f59e0b;
+    --danger:   #ef4444;
+    --view-clr: #3b82f6;
+    --edit-clr: #22c55e;
+    --admin-clr:#f59e0b;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    min-height: 100vh;
+  }
+
+  /* ── Top bar ── */
+  .topbar {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  .topbar-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 1.1rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .topbar-brand svg { flex-shrink: 0; }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+  }
+  .badge-view  { background: rgba(59,130,246,.15); color: var(--view-clr); border: 1px solid rgba(59,130,246,.3); }
+  .badge-edit  { background: rgba(34,197,94,.15);  color: var(--edit-clr); border: 1px solid rgba(34,197,94,.3); }
+  .badge-admin { background: rgba(245,158,11,.15); color: var(--admin-clr);border: 1px solid rgba(245,158,11,.3);}
+
+  /* ── Hero ── */
+  .hero {
+    padding: 48px 24px 32px;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+  .hero h1 { font-size: 1.8rem; font-weight: 700; margin-bottom: 8px; }
+  .hero-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: center;
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin-top: 12px;
+  }
+  .hero-meta span { display: flex; align-items: center; gap: 5px; }
+
+  /* ── Content area ── */
+  .container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 24px 60px;
+  }
+
+  /* ── Toolbar ── */
+  .toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .search-wrap {
+    position: relative;
+    flex: 1;
+    min-width: 200px;
+    max-width: 360px;
+  }
+  .search-wrap svg {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--muted);
+    pointer-events: none;
+  }
+  .search-input {
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 12px 8px 34px;
+    border-radius: 8px;
+    font-size: 0.87rem;
+    outline: none;
+    transition: border-color .2s;
+  }
+  .search-input:focus { border-color: var(--accent); }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 0.87rem;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+    transition: opacity .15s, transform .1s;
+    white-space: nowrap;
+  }
+  .btn:active { transform: scale(.97); }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { opacity: .9; }
+  .btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-danger { background: rgba(239,68,68,.12); color: var(--danger); border: 1px solid rgba(239,68,68,.25); }
+  .btn-danger:hover { background: rgba(239,68,68,.22); }
+
+  /* ── Table ── */
+  .table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+  thead tr { background: rgba(255,255,255,.03); }
+  th {
+    padding: 12px 16px;
+    text-align: left;
+    color: var(--muted);
+    font-weight: 500;
+    font-size: .78rem;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  td {
+    padding: 11px 16px;
+    border-bottom: 1px solid rgba(255,255,255,.04);
+    vertical-align: middle;
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,.025); }
+
+  .td-actions { display: flex; gap: 6px; }
+  .btn-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .btn-icon:hover { border-color: var(--accent); color: var(--accent); background: rgba(99,102,241,.08); }
+  .btn-icon.danger:hover { border-color: var(--danger); color: var(--danger); background: rgba(239,68,68,.08); }
+
+  /* ── Empty / loading / error states ── */
+  .state-box {
+    padding: 64px 24px;
+    text-align: center;
+    color: var(--muted);
+  }
+  .state-box svg { opacity: .35; margin-bottom: 14px; }
+  .state-box p { font-size: .95rem; }
+
+  .spinner {
+    width: 36px; height: 36px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    margin: 0 auto 12px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Modal ── */
+  .modal-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.6);
+    backdrop-filter: blur(4px);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    width: 100%;
+    max-width: 520px;
+    padding: 28px;
+    position: relative;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+  .modal h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: 20px; }
+  .modal-close {
+    position: absolute; top: 16px; right: 16px;
+    background: none; border: none; color: var(--muted);
+    cursor: pointer; font-size: 1.3rem; line-height: 1;
+  }
+  .modal-close:hover { color: var(--text); }
+
+  .form-group { margin-bottom: 16px; }
+  .form-group label { display: block; font-size: .83rem; color: var(--muted); margin-bottom: 6px; }
+  .form-group input, .form-group select, .form-group textarea {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 9px 12px;
+    border-radius: 8px;
+    font-size: .875rem;
+    outline: none;
+    transition: border-color .2s;
+    font-family: inherit;
+  }
+  .form-group input:focus,
+  .form-group select:focus,
+  .form-group textarea:focus { border-color: var(--accent); }
+  .form-group select option { background: var(--surface); }
+
+  .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+
+  /* ── Toast ── */
+  .toast-container {
+    position: fixed;
+    bottom: 20px; right: 20px;
+    display: flex; flex-direction: column; gap: 8px;
+    z-index: 200;
+  }
+  .toast {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: .875rem;
+    min-width: 240px;
+    max-width: 360px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.4);
+    animation: toastIn .2s ease;
+  }
+  @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } }
+  .toast.success { border-left: 3px solid var(--success); }
+  .toast.error   { border-left: 3px solid var(--danger); }
+  .toast.info    { border-left: 3px solid var(--accent); }
+
+  /* ── Permission info bar ── */
+  .perm-bar {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 18px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+    font-size: .85rem;
+    color: var(--muted);
+  }
+  .perm-bar strong { color: var(--text); }
+
+  /* ── Fields chips ── */
+  .field-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 20px; }
+  .field-chip {
+    background: rgba(99,102,241,.1);
+    border: 1px solid rgba(99,102,241,.25);
+    color: var(--accent);
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: .75rem;
+    font-weight: 500;
+  }
+  .field-chip span { color: var(--muted); font-weight: 400; }
+
+  @media (max-width: 640px) {
+    .hero h1 { font-size: 1.4rem; }
+    .toolbar { flex-direction: column; align-items: stretch; }
+    .search-wrap { max-width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div class="topbar">
+  <div class="topbar-brand">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0018 0V5"/><path d="M3 12a9 3 0 0018 0"/>
+    </svg>
+    FluxDB
+  </div>
+  <div id="permBadge"></div>
+</div>
+
+<!-- Hero section -->
+<div class="hero">
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+    <h1 id="dbTitle">Loading…</h1>
+  </div>
+  <div class="hero-meta" id="heroMeta"></div>
+</div>
+
+<!-- Main content -->
+<div class="container">
+
+  <!-- Permission info bar -->
+  <div class="perm-bar" id="permBar" style="display:none">
+    <span id="permDesc"></span>
+  </div>
+
+  <!-- Field chips -->
+  <div class="field-chips" id="fieldChips"></div>
+
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <div class="search-wrap">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+      <input class="search-input" id="searchInput" type="text" placeholder="Search records…" oninput="filterRecords()">
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-ghost" onclick="exportCSV()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        Export CSV
+      </button>
+      <button class="btn btn-primary" id="addRecordBtn" style="display:none" onclick="openAddModal()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
+        Add Record
+      </button>
+    </div>
+  </div>
+
+  <!-- Table -->
+  <div class="table-wrap">
+    <div class="state-box" id="loadingState">
+      <div class="spinner"></div>
+      <p>Loading shared database…</p>
+    </div>
+    <div class="state-box" id="errorState" style="display:none">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
+      </svg>
+      <p id="errorMsg">Link not found or has expired.</p>
+    </div>
+    <div id="tableContainer" style="display:none">
+      <table id="recordsTable">
+        <thead id="tableHead"></thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+    <div class="state-box" id="emptyState" style="display:none">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6M9 12h6M9 15h4"/>
+      </svg>
+      <p>No records yet.</p>
+    </div>
+  </div>
+
+  <div style="margin-top:12px;color:var(--muted);font-size:.78rem;" id="recordCount"></div>
+</div>
+
+<!-- Add/Edit Record Modal -->
+<div class="modal-overlay" id="recordModal">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal()">&times;</button>
+    <h2 id="modalTitle">Add Record</h2>
+    <div id="modalFields"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveRecord()" id="saveBtn">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+  const token = location.pathname.split('/share/')[1] || '';
+  let shareData = null;
+  let allRecords = [];
+  let editingRecordId = null;
+
+  // ── Bootstrap ──
+  (async function load() {
+    try {
+      const res = await fetch(`/api/shared/${token}`);
+      if (!res.ok) {
+        const err = await res.json();
+        showError(err.error || 'This link is invalid or has expired.');
+        return;
+      }
+      shareData = await res.json();
+      allRecords = shareData.records || [];
+      renderPage();
+    } catch (e) {
+      showError('Failed to load shared database.');
+    }
+  })();
+
+  function renderPage() {
+    const { database, permission, label, createdBy, expiresAt } = shareData;
+
+    // Title
+    document.title = `${database.name} – FluxDB Shared`;
+    document.getElementById('dbTitle').textContent = database.name;
+
+    // Permission badge
+    const permLabels = { view: 'View Only', edit: 'Can Edit', admin: 'Admin' };
+    document.getElementById('permBadge').innerHTML =
+      `<span class="badge badge-${permission}">${permLabels[permission]}</span>`;
+
+    // Hero meta
+    const meta = [];
+    if (label) meta.push(`<span>📌 ${escHtml(label)}</span>`);
+    meta.push(`<span>Shared by <strong>${escHtml(createdBy)}</strong></span>`);
+    if (expiresAt) meta.push(`<span>Expires ${new Date(expiresAt).toLocaleDateString()}</span>`);
+    meta.push(`<span>${database.fields.length} field(s)</span>`);
+    document.getElementById('heroMeta').innerHTML = meta.join('');
+
+    // Perm bar
+    const permBar = document.getElementById('permBar');
+    const permDesc = document.getElementById('permDesc');
+    const permInfo = {
+      view:  '👁️ <strong>View Only</strong> – You can browse and export records.',
+      edit:  '✏️ <strong>Can Edit</strong> – You can view, add, and edit records.',
+      admin: '⚡ <strong>Admin</strong> – You can view, add, edit, and delete records.',
+    };
+    permDesc.innerHTML = permInfo[permission];
+    permBar.style.display = 'flex';
+
+    // Show Add Record button if allowed
+    if (permission === 'edit' || permission === 'admin') {
+      document.getElementById('addRecordBtn').style.display = 'inline-flex';
+    }
+
+    // Field chips
+    const chips = database.fields.map(f =>
+      `<span class="field-chip">${escHtml(f.name)} <span>${f.type}</span></span>`
+    ).join('');
+    document.getElementById('fieldChips').innerHTML = chips;
+
+    // Render table
+    buildTableHeader();
+    renderRows(allRecords);
+
+    document.getElementById('loadingState').style.display = 'none';
+  }
+
+  function buildTableHeader() {
+    const { database, permission } = shareData;
+    const th = database.fields.map(f => `<th>${escHtml(f.name)}</th>`).join('');
+    const actions = (permission === 'edit' || permission === 'admin')
+      ? '<th>Actions</th>' : '';
+    document.getElementById('tableHead').innerHTML = `<tr>${th}${actions}</tr>`;
+  }
+
+  function renderRows(records) {
+    const { database, permission } = shareData;
+    const tbody = document.getElementById('tableBody');
+
+    document.getElementById('tableContainer').style.display = records.length ? '' : 'none';
+    document.getElementById('emptyState').style.display = records.length ? 'none' : '';
+    document.getElementById('recordCount').textContent = records.length
+      ? `${records.length} record${records.length !== 1 ? 's' : ''}` : '';
+
+    const canEdit = permission === 'edit' || permission === 'admin';
+    const canDelete = permission === 'admin';
+
+    tbody.innerHTML = records.map(rec => {
+      const cells = database.fields.map(f =>
+        `<td title="${escHtml(String(rec.data[f.name] ?? ''))}">${escHtml(String(rec.data[f.name] ?? ''))}</td>`
+      ).join('');
+
+      const editBtn = canEdit
+        ? `<button class="btn-icon" title="Edit" onclick='openEditModal(${JSON.stringify(rec)})'>
+             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+               <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+               <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+             </svg>
+           </button>` : '';
+      const delBtn = canDelete
+        ? `<button class="btn-icon danger" title="Delete" onclick="deleteRecord('${rec.id}')">
+             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+               <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
+               <path d="M10 11v6M14 11v6M9 6V4h6v2"/>
+             </svg>
+           </button>` : '';
+
+      const actionCell = (editBtn || delBtn)
+        ? `<td><div class="td-actions">${editBtn}${delBtn}</div></td>` : '';
+
+      return `<tr>${cells}${actionCell}</tr>`;
+    }).join('');
+  }
+
+  function filterRecords() {
+    const q = document.getElementById('searchInput').value.toLowerCase();
+    if (!q) { renderRows(allRecords); return; }
+    const filtered = allRecords.filter(r =>
+      Object.values(r.data).some(v => String(v).toLowerCase().includes(q))
+    );
+    renderRows(filtered);
+  }
+
+  // ── Add / Edit modal ──
+  function openAddModal() {
+    editingRecordId = null;
+    document.getElementById('modalTitle').textContent = 'Add Record';
+    renderModalFields(null);
+    document.getElementById('recordModal').classList.add('open');
+  }
+
+  function openEditModal(rec) {
+    editingRecordId = rec.id;
+    document.getElementById('modalTitle').textContent = 'Edit Record';
+    renderModalFields(rec.data);
+    document.getElementById('recordModal').classList.add('open');
+  }
+
+  function closeModal() {
+    document.getElementById('recordModal').classList.remove('open');
+  }
+
+  function renderModalFields(existingData) {
+    const { database } = shareData;
+    const html = database.fields.map(f => {
+      const val = existingData ? (existingData[f.name] ?? '') : '';
+      const inputType = f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text';
+      if (f.type === 'boolean') {
+        return `<div class="form-group">
+          <label>${escHtml(f.name)}</label>
+          <select name="${escHtml(f.name)}">
+            <option value="true" ${val === true || val === 'true' ? 'selected' : ''}>true</option>
+            <option value="false" ${val === false || val === 'false' ? 'selected' : ''}>false</option>
+          </select>
+        </div>`;
+      }
+      return `<div class="form-group">
+        <label>${escHtml(f.name)} <span style="color:var(--muted)">(${f.type})</span></label>
+        <input type="${inputType}" name="${escHtml(f.name)}" value="${escHtml(String(val))}">
+      </div>`;
+    }).join('');
+    document.getElementById('modalFields').innerHTML = html;
+  }
+
+  async function saveRecord() {
+    const { database } = shareData;
+    const data = {};
+    for (const f of database.fields) {
+      const el = document.querySelector(`#modalFields [name="${f.name}"]`);
+      if (!el) continue;
+      data[f.name] = f.type === 'number' ? Number(el.value) :
+                     f.type === 'boolean' ? el.value === 'true' : el.value;
+    }
+    const btn = document.getElementById('saveBtn');
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+
+    try {
+      let res;
+      if (editingRecordId) {
+        res = await fetch(`/api/shared/${token}/records/${editingRecordId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data }),
+        });
+      } else {
+        res = await fetch(`/api/shared/${token}/records`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data }),
+        });
+      }
+      if (!res.ok) {
+        const err = await res.json();
+        toast(err.error || 'Save failed', 'error');
+      } else {
+        const saved = await res.json();
+        if (editingRecordId) {
+          allRecords = allRecords.map(r => r.id === saved.id ? saved : r);
+          toast('Record updated', 'success');
+        } else {
+          allRecords.push(saved);
+          toast('Record added', 'success');
+        }
+        closeModal();
+        filterRecords();
+      }
+    } catch { toast('Network error', 'error'); }
+    btn.disabled = false;
+    btn.textContent = 'Save';
+  }
+
+  async function deleteRecord(id) {
+    if (!confirm('Delete this record?')) return;
+    const res = await fetch(`/api/shared/${token}/records/${id}`, { method: 'DELETE' });
+    if (res.ok) {
+      allRecords = allRecords.filter(r => r.id !== id);
+      toast('Record deleted', 'success');
+      filterRecords();
+    } else {
+      const err = await res.json();
+      toast(err.error || 'Delete failed', 'error');
+    }
+  }
+
+  // ── Export CSV ──
+  function exportCSV() {
+    if (!shareData) return;
+    const { database } = shareData;
+    const fields = database.fields.map(f => f.name);
+    const rows = [fields.join(',')];
+    for (const rec of allRecords) {
+      rows.push(fields.map(f => JSON.stringify(String(rec.data[f] ?? ''))).join(','));
+    }
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${database.name}.csv`;
+    a.click();
+  }
+
+  // ── Helpers ──
+  function showError(msg) {
+    document.getElementById('loadingState').style.display = 'none';
+    document.getElementById('errorMsg').textContent = msg;
+    document.getElementById('errorState').style.display = '';
+  }
+
+  function escHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function toast(msg, type = 'info') {
+    const c = document.getElementById('toastContainer');
+    const t = document.createElement('div');
+    t.className = `toast ${type}`;
+    t.textContent = msg;
+    c.appendChild(t);
+    setTimeout(() => t.remove(), 3200);
+  }
+
+  // Close modal on overlay click
+  document.getElementById('recordModal').addEventListener('click', e => {
+    if (e.target === e.currentTarget) closeModal();
+  });
+</script>
+</body>
+</html>

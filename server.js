@@ -36,6 +36,7 @@ db.defaults({
   webhooks:    [],   // { id, event, url, name, secret, createdBy, createdAt, active }
   credentials: [],   // { id, name, value, description, createdBy, createdAt, updatedAt }
   relationships: [], // { id, name, fromDb, fromField, toDb, toField, type, createdBy, createdAt }
+  shareLinks:  [],   // { id, token, databaseId, permission, label, createdBy, createdAt, expiresAt, accessCount }
 }).write();
 
 // ─── Activity log helper ──────────────────────────────────────────────────────
@@ -2027,6 +2028,165 @@ setInterval(() => {
 // ─── Serve SPA ────────────────────────────────────────────────────────────────
 app.get('/login', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+// ─── Share links ──────────────────────────────────────────────────────────────
+// Permissions: view (read-only) | edit (add + edit records) | admin (full access)
+
+// Generate a share link for a database
+app.post('/api/databases/:id/share', requireMember, (req, res) => {
+  const database = db.get('databases').find({ id: req.params.id }).value();
+  if (!database) return res.status(404).json({ error: 'Database not found' });
+
+  const { permission = 'view', label = '', expiresIn } = req.body;
+  if (!['view', 'edit', 'admin'].includes(permission)) {
+    return res.status(400).json({ error: 'permission must be view | edit | admin' });
+  }
+
+  const user = getAuthUser(req);
+  // Only admins can generate admin-permission links
+  if (permission === 'admin' && user.role !== 'admin') {
+    return res.status(403).json({ error: 'Only admins can create admin-level share links' });
+  }
+
+  const token = crypto.randomBytes(24).toString('hex');
+  const link = {
+    id: uuidv4(),
+    token,
+    databaseId: req.params.id,
+    permission,
+    label: String(label).slice(0, 80),
+    createdBy: user.username,
+    createdAt: new Date().toISOString(),
+    expiresAt: expiresIn ? new Date(Date.now() + Number(expiresIn) * 1000).toISOString() : null,
+    accessCount: 0,
+  };
+  db.get('shareLinks').push(link).write();
+  logActivity('create_share', user.username, database.name, `Created ${permission} share link for "${database.name}"`);
+  res.status(201).json({ ...link, shareUrl: `/share/${token}` });
+});
+
+// List all share links for a database
+app.get('/api/databases/:id/shares', requireMember, (req, res) => {
+  const database = db.get('databases').find({ id: req.params.id }).value();
+  if (!database) return res.status(404).json({ error: 'Database not found' });
+
+  const links = db.get('shareLinks').filter({ databaseId: req.params.id }).value()
+    .map(l => ({ ...l, shareUrl: `/share/${l.token}` }));
+  res.json(links);
+});
+
+// Revoke a share link
+app.delete('/api/shares/:token', requireMember, (req, res) => {
+  const link = db.get('shareLinks').find({ token: req.params.token }).value();
+  if (!link) return res.status(404).json({ error: 'Share link not found' });
+
+  const user = getAuthUser(req);
+  if (user.role !== 'admin' && link.createdBy !== user.username) {
+    return res.status(403).json({ error: 'You can only revoke your own share links' });
+  }
+  db.get('shareLinks').remove({ token: req.params.token }).write();
+  res.json({ message: 'Share link revoked' });
+});
+
+// ─── Public shared-database access (no auth required) ─────────────────────────
+function resolveShareLink(token) {
+  const link = db.get('shareLinks').find({ token }).value();
+  if (!link) return null;
+  if (link.expiresAt && new Date(link.expiresAt) < new Date()) return null;
+  return link;
+}
+
+// Serve the public share viewer page
+app.get('/share/:token', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'share.html'));
+});
+
+// Get shared database metadata + records
+app.get('/api/shared/:token', (req, res) => {
+  const link = resolveShareLink(req.params.token);
+  if (!link) return res.status(404).json({ error: 'Share link not found or expired' });
+
+  const database = db.get('databases').find({ id: link.databaseId }).value();
+  if (!database) return res.status(404).json({ error: 'Database no longer exists' });
+
+  const records = db.get('records').filter({ databaseId: link.databaseId }).value();
+
+  // Increment access count
+  db.get('shareLinks').find({ token: req.params.token })
+    .assign({ accessCount: link.accessCount + 1 }).write();
+
+  res.json({
+    database,
+    records,
+    permission: link.permission,
+    label: link.label,
+    createdBy: link.createdBy,
+    expiresAt: link.expiresAt,
+  });
+});
+
+// Add a record via share link (edit or admin permission required)
+app.post('/api/shared/:token/records', (req, res) => {
+  const link = resolveShareLink(req.params.token);
+  if (!link) return res.status(404).json({ error: 'Share link not found or expired' });
+  if (link.permission === 'view') return res.status(403).json({ error: 'This link is read-only' });
+
+  const database = db.get('databases').find({ id: link.databaseId }).value();
+  if (!database) return res.status(404).json({ error: 'Database no longer exists' });
+
+  const validated = validateRecordData(req.body.data || {}, database.fields);
+  if (validated.error) return res.status(400).json({ error: validated.error });
+
+  const newRecord = {
+    id: uuidv4(),
+    databaseId: link.databaseId,
+    data: validated.data,
+    createdBy: `shared:${link.token.slice(0, 8)}`,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  db.get('records').push(newRecord).write();
+  fireWebhooks('record.created', { database: database.name, databaseId: database.id, record: { id: newRecord.id, ...newRecord.data }, triggeredBy: 'share_link' });
+  broadcastWS('record_added', database.name, database.id, { id: newRecord.id, ...newRecord.data });
+  res.status(201).json(newRecord);
+});
+
+// Edit a record via share link (edit or admin permission required)
+app.put('/api/shared/:token/records/:id', (req, res) => {
+  const link = resolveShareLink(req.params.token);
+  if (!link) return res.status(404).json({ error: 'Share link not found or expired' });
+  if (link.permission === 'view') return res.status(403).json({ error: 'This link is read-only' });
+
+  const database = db.get('databases').find({ id: link.databaseId }).value();
+  if (!database) return res.status(404).json({ error: 'Database no longer exists' });
+
+  const record = db.get('records').find({ id: req.params.id, databaseId: link.databaseId }).value();
+  if (!record) return res.status(404).json({ error: 'Record not found' });
+
+  const validated = validateRecordData(req.body.data || {}, database.fields);
+  if (validated.error) return res.status(400).json({ error: validated.error });
+
+  db.get('records').find({ id: req.params.id })
+    .assign({ data: validated.data, updatedAt: new Date().toISOString() }).write();
+  const updated = db.get('records').find({ id: req.params.id }).value();
+  broadcastWS('record_updated', database.name, database.id, { id: updated.id, ...updated.data });
+  res.json(updated);
+});
+
+// Delete a record via share link (admin permission only)
+app.delete('/api/shared/:token/records/:id', (req, res) => {
+  const link = resolveShareLink(req.params.token);
+  if (!link) return res.status(404).json({ error: 'Share link not found or expired' });
+  if (link.permission !== 'admin') return res.status(403).json({ error: 'Admin permission required to delete records' });
+
+  const database = db.get('databases').find({ id: link.databaseId }).value();
+  const record = db.get('records').find({ id: req.params.id, databaseId: link.databaseId }).value();
+  if (!record) return res.status(404).json({ error: 'Record not found' });
+
+  db.get('records').remove({ id: req.params.id }).write();
+  if (database) broadcastWS('record_deleted', database.name, link.databaseId, { id: req.params.id });
+  res.json({ message: 'Record deleted' });
 });
 
 app.get('/{*path}', (req, res) => {

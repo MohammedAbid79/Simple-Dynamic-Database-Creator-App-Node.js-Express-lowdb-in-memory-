@@ -370,6 +370,7 @@ async function loadDatabases() {
       </div>
       <div class="db-card-actions" onclick="event.stopPropagation()">
         <button class="btn btn-sm btn-outline" onclick="openRecords('${d.id}')">&#128202; Open</button>
+        <button class="btn btn-sm btn-outline" onclick="openShareModal('${d.id}','${esc(d.name)}')">&#128279; Share</button>
         ${currentUser.role === 'admin' ? `
           <button class="btn btn-sm btn-outline" onclick="editDatabase('${d.id}')">&#9998; Edit</button>
           <button class="btn btn-sm btn-danger" onclick="deleteDatabase('${d.id}','${esc(d.name)}')">&#128465; Delete</button>
@@ -2748,3 +2749,146 @@ function confirmDeleteBackup(filename) {
 
 document.getElementById('btn-create-backup').onclick  = createBackup;
 document.getElementById('btn-refresh-backups').onclick = loadBackups;
+
+// ─── Share Links ─────────────────────────────────────────────────────────────
+
+async function openShareModal(dbId, dbName) {
+  let links = [];
+  try {
+    links = await api('GET', `/databases/${dbId}/shares`);
+  } catch (e) { /* ignore, show empty */ }
+
+  const permBadge = perm => {
+    const colors = { view: '#3b82f6', edit: '#22c55e', admin: '#f59e0b' };
+    const labels = { view: 'View Only', edit: 'Can Edit', admin: 'Admin' };
+    return `<span style="background:${colors[perm]}22;color:${colors[perm]};border:1px solid ${colors[perm]}44;padding:2px 8px;border-radius:12px;font-size:.72rem;font-weight:600;text-transform:uppercase">${labels[perm]}</span>`;
+  };
+
+  const linksHtml = links.length === 0
+    ? `<p style="color:var(--text-muted);font-size:.84rem;padding:12px 0">No active share links yet.</p>`
+    : `<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px">
+        ${links.map(l => `
+          <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+              <div style="display:flex;align-items:center;gap:8px">
+                ${permBadge(l.permission)}
+                ${l.label ? `<span style="font-size:.82rem;color:var(--text-muted)">${esc(l.label)}</span>` : ''}
+              </div>
+              <div style="display:flex;gap:6px">
+                <button class="btn btn-sm btn-outline" onclick="copyShareLink('${l.shareUrl}')">Copy Link</button>
+                <button class="btn btn-sm btn-danger" onclick="revokeShareLink('${l.token}','${dbId}','${esc(dbName)}')">Revoke</button>
+              </div>
+            </div>
+            <div style="margin-top:6px;font-size:.75rem;color:var(--text-muted)">
+              ${l.accessCount} view${l.accessCount !== 1 ? 's' : ''}
+              &bull; Created by ${esc(l.createdBy)}
+              &bull; ${fmtDate(l.createdAt)}
+              ${l.expiresAt ? `&bull; Expires ${fmtDate(l.expiresAt)}` : ''}
+            </div>
+          </div>`).join('')}
+      </div>`;
+
+  const isAdmin = currentUser.role === 'admin';
+  const adminOpt = isAdmin ? `<option value="admin">Admin (full access)</option>` : '';
+
+  const body = `
+    <div style="margin-bottom:18px">
+      <div style="font-size:.8rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Active Links</div>
+      ${linksHtml}
+    </div>
+    <hr style="border-color:var(--border);margin:16px 0">
+    <div style="font-size:.8rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">Generate New Link</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div>
+        <label style="font-size:.8rem;color:var(--text-muted);display:block;margin-bottom:5px">Permission</label>
+        <select id="share-perm" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:7px;font-size:.86rem">
+          <option value="view">View Only</option>
+          <option value="edit">Can Edit</option>
+          ${adminOpt}
+        </select>
+      </div>
+      <div>
+        <label style="font-size:.8rem;color:var(--text-muted);display:block;margin-bottom:5px">Expires In</label>
+        <select id="share-expires" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:7px;font-size:.86rem">
+          <option value="">Never</option>
+          <option value="3600">1 Hour</option>
+          <option value="86400">1 Day</option>
+          <option value="604800">7 Days</option>
+          <option value="2592000">30 Days</option>
+        </select>
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      <label style="font-size:.8rem;color:var(--text-muted);display:block;margin-bottom:5px">Label (optional)</label>
+      <input id="share-label" type="text" maxlength="80" placeholder="e.g. For the marketing team"
+        style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:7px;font-size:.86rem">
+    </div>
+    <div id="share-result" style="display:none;margin-top:14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px">
+      <div style="font-size:.78rem;color:var(--text-muted);margin-bottom:6px">Share link generated:</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <code id="share-url-text" style="flex:1;font-size:.82rem;word-break:break-all;color:var(--accent)"></code>
+        <button class="btn btn-sm btn-outline" onclick="copyShareLink(document.getElementById('share-url-text').textContent)">Copy</button>
+      </div>
+    </div>`;
+
+  openModal(`\uD83D\uDD17 Share "${dbName}"`, body, async () => {
+    const permission = document.getElementById('share-perm').value;
+    const expiresIn  = document.getElementById('share-expires').value || undefined;
+    const label      = document.getElementById('share-label').value.trim();
+    try {
+      const result = await api('POST', `/databases/${dbId}/share`, { permission, expiresIn, label });
+      const fullUrl = `${location.origin}${result.shareUrl}`;
+      document.getElementById('share-result').style.display = '';
+      document.getElementById('share-url-text').textContent = fullUrl;
+      // Refresh the links list without closing modal
+      try {
+        const updated = await api('GET', `/databases/${dbId}/shares`);
+        // rebuild the active links section
+        const linksSection = document.querySelector('#modal-body > div:first-child');
+        if (linksSection) {
+          linksSection.innerHTML = `
+            <div style="font-size:.8rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Active Links</div>
+            ${updated.length === 0 ? '<p style="color:var(--text-muted);font-size:.84rem;padding:12px 0">No active share links yet.</p>' :
+              `<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px">
+                ${updated.map(l => `
+                  <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+                      <div style="display:flex;align-items:center;gap:8px">
+                        ${permBadge(l.permission)}
+                        ${l.label ? `<span style="font-size:.82rem;color:var(--text-muted)">${esc(l.label)}</span>` : ''}
+                      </div>
+                      <div style="display:flex;gap:6px">
+                        <button class="btn btn-sm btn-outline" onclick="copyShareLink('${l.shareUrl}')">Copy Link</button>
+                        <button class="btn btn-sm btn-danger" onclick="revokeShareLink('${l.token}','${dbId}','${esc(dbName)}')">Revoke</button>
+                      </div>
+                    </div>
+                    <div style="margin-top:6px;font-size:.75rem;color:var(--text-muted)">
+                      ${l.accessCount} view${l.accessCount !== 1 ? 's' : ''}
+                      &bull; Created by ${esc(l.createdBy)}
+                      &bull; ${fmtDate(l.createdAt)}
+                      ${l.expiresAt ? `&bull; Expires ${fmtDate(l.expiresAt)}` : ''}
+                    </div>
+                  </div>`).join('')}
+              </div>`}`;
+        }
+      } catch (e) { /* ignore refresh error */ }
+    } catch (err) { toast(err.message, 'error'); }
+    return false; // Keep modal open
+  }, 'Generate Link');
+}
+
+function copyShareLink(urlOrPath) {
+  const full = urlOrPath.startsWith('http') ? urlOrPath : `${location.origin}${urlOrPath}`;
+  navigator.clipboard.writeText(full).then(() => toast('Link copied to clipboard!', 'success'))
+    .catch(() => toast(full, 'info'));
+}
+
+async function revokeShareLink(token, dbId, dbName) {
+  if (!confirm('Revoke this share link? Anyone using it will lose access.')) return;
+  try {
+    await api('DELETE', `/shares/${token}`);
+    toast('Share link revoked', 'success');
+    closeModal();
+    openShareModal(dbId, dbName);
+  } catch (err) { toast(err.message, 'error'); }
+}
