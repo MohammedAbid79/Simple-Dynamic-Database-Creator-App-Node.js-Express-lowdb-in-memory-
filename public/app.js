@@ -88,6 +88,7 @@ document.querySelectorAll('.nav-btn[data-view]').forEach(btn => {
     if (btn.dataset.view === 'credentials') loadCredentials();
     if (btn.dataset.view === 'backups')     loadBackups();
     if (btn.dataset.view === 'stream')      initStreamView();
+    if (btn.dataset.view === 'relations')   loadRelations();
   });
 });
 
@@ -142,6 +143,7 @@ async function bootApp() {
   document.getElementById('nav-webhooks').style.display        = (isAdmin || isMember) ? '' : 'none';
   document.getElementById('btn-create-webhook').style.display  = (isAdmin || isMember) ? '' : 'none';
   document.getElementById('nav-stream').style.display          = (isAdmin || isMember) ? '' : 'none';
+  document.getElementById('nav-relations').style.display       = (isAdmin || isMember) ? '' : 'none';
 
   showView('view-dashboard');
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -219,9 +221,10 @@ const DASH_STAT_META = {
   databases:   { label: 'Databases',   color: 'var(--accent)',    link: 'databases'   },
   records:     { label: 'Records',     color: 'var(--success)',   link: 'databases'   },
   users:       { label: 'Users',       color: 'var(--warn)',      link: 'users'       },
-  apiKeys:     { label: 'API Keys',    color: 'var(--accent-h)',  link: 'apikeys'     },
-  webhooks:    { label: 'Webhooks',    color: 'var(--accent)',    link: 'webhooks'    },
-  credentials: { label: 'Credentials',color: 'var(--warn)',      link: 'credentials' },
+  apiKeys:       { label: 'API Keys',      color: 'var(--accent-h)',  link: 'apikeys'   },
+  webhooks:      { label: 'Webhooks',      color: 'var(--accent)',    link: 'webhooks'  },
+  credentials:   { label: 'Credentials',  color: 'var(--warn)',      link: 'credentials'},
+  relationships: { label: 'Relationships', color: 'var(--success)',   link: 'relations' },
 };
 
 const DASH_ACTION_META = {
@@ -237,11 +240,13 @@ const DASH_ACTION_META = {
   reveal_credential:  { label: 'Revealed credential'},
   create_user:        { label: 'Created user'       },
   delete_user:        { label: 'Deleted user'       },
-  create_key:         { label: 'Generated API key'  },
-  update_key:         { label: 'Updated key role'   },
-  delete_key:         { label: 'Revoked API key'    },
-  login:              { label: 'Logged in'          },
-  logout:             { label: 'Logged out'         },
+  create_key:         { label: 'Generated API key'     },
+  update_key:         { label: 'Updated key role'      },
+  delete_key:         { label: 'Revoked API key'       },
+  create_rel:         { label: 'Created relationship'  },
+  delete_rel:         { label: 'Deleted relationship'  },
+  login:              { label: 'Logged in'             },
+  logout:             { label: 'Logged out'            },
 };
 
 async function loadDashboard() {
@@ -1237,6 +1242,385 @@ function streamDisconnect() {
   if (_ws) { _ws.close(); _ws = null; }
   setWsBadge('off');
   document.getElementById('stream-sub-panel').style.display = 'none';
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   DYNAMIC RELATIONSHIP ENGINE VIEW
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+let _joinRows    = [];   // last join result rows (for CSV export)
+let _joinCols    = [];   // last join result column names
+let _joinCount   = 0;    // running join counter for unique IDs
+
+async function loadRelations() {
+  await Promise.all([renderRelList(), populateRelFromDb()]);
+  wireRelExplorer();
+}
+
+// ── Relationship list ─────────────────────────────────────────────────────────
+async function renderRelList() {
+  const wrap = document.getElementById('rel-list');
+  wrap.innerHTML = '<p class="empty-state">Loading…</p>';
+  try {
+    const rels = await api('GET', '/relationships');
+    if (rels.length === 0) {
+      wrap.innerHTML = '<p class="empty-state">No relationships yet. Click <b>+ New Relationship</b> to define one.</p>';
+      return;
+    }
+    wrap.innerHTML = `<table>
+      <thead><tr>
+        <th>Name</th><th>Type</th><th>From</th><th>→</th><th>To</th><th>Created By</th><th>Actions</th>
+      </tr></thead>
+      <tbody>${rels.map(r => `<tr>
+        <td><strong>${esc(r.name)}</strong></td>
+        <td><span class="rel-type-badge rel-type-${r.type.replace('-','')}">
+          ${r.type === 'one-to-one' ? '1 → 1' : '1 → N'}
+        </span></td>
+        <td><code class="rel-field-code">${esc(r.fromDbName)}</code>
+            <span class="rel-dot">.</span>
+            <code class="rel-field-code">${esc(r.fromField)}</code></td>
+        <td class="rel-arrow">→</td>
+        <td><code class="rel-field-code">${esc(r.toDbName)}</code>
+            <span class="rel-dot">.</span>
+            <code class="rel-field-code">${esc(r.toField)}</code></td>
+        <td style="color:var(--text-muted)">${esc(r.createdBy)}</td>
+        <td><div class="actions-cell">
+          <button class="btn-icon del" onclick="deleteRelationship('${r.id}','${esc(r.name)}')">
+            &#128465; Delete
+          </button>
+        </div></td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+  } catch (err) {
+    wrap.innerHTML = `<p class="empty-state" style="color:var(--danger)">${esc(err.message)}</p>`;
+  }
+}
+
+// ── Create relationship modal ─────────────────────────────────────────────────
+document.getElementById('btn-create-rel').onclick = async () => {
+  let dbs = [];
+  try { dbs = await api('GET', '/databases'); } catch (_) {}
+
+  const dbOpts = dbs.map(d => `<option value="${d.id}">${esc(d.name)}</option>`).join('');
+  const relFieldOpts = (dbId) => {
+    const d = dbs.find(x => x.id === dbId);
+    if (!d) return '';
+    const sys = ['id','createdBy','createdAt','updatedAt'];
+    return [...sys, ...d.fields.map(f => f.name)]
+      .map(n => `<option value="${n}">${n}</option>`).join('');
+  };
+
+  openModal('New Relationship', `
+    <label>Name <span style="color:var(--text-muted);font-weight:400">(optional — auto-generated if blank)</span></label>
+    <input id="rel-name-inp" type="text" placeholder="e.g. orders → users" maxlength="80" />
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+      <div>
+        <label>From Database</label>
+        <select id="rel-from-inp" onchange="updateRelFieldOpts()">
+          <option value="">— select —</option>${dbOpts}
+        </select>
+      </div>
+      <div>
+        <label>From Field <span style="color:var(--text-muted);font-size:.78rem">(the FK field)</span></label>
+        <select id="rel-fromfield-inp"><option value="">— pick database first —</option></select>
+      </div>
+      <div>
+        <label>To Database</label>
+        <select id="rel-to-inp" onchange="updateRelFieldOpts()">
+          <option value="">— select —</option>${dbOpts}
+        </select>
+      </div>
+      <div>
+        <label>To Field <span style="color:var(--text-muted);font-size:.78rem">(usually <code>id</code>)</span></label>
+        <select id="rel-tofield-inp"><option value="">— pick database first —</option></select>
+      </div>
+    </div>
+
+    <label style="margin-top:12px">Cardinality</label>
+    <select id="rel-type-inp">
+      <option value="one-to-many" selected>One-to-Many (1 → N)  e.g. user has many orders</option>
+      <option value="one-to-one" >One-to-One  (1 → 1)  e.g. user has one profile</option>
+    </select>
+
+    <div id="rel-create-preview" style="margin-top:12px"></div>`,
+    async () => {
+      const name      = document.getElementById('rel-name-inp').value.trim();
+      const fromDb    = document.getElementById('rel-from-inp').value;
+      const fromField = document.getElementById('rel-fromfield-inp').value;
+      const toDb      = document.getElementById('rel-to-inp').value;
+      const toField   = document.getElementById('rel-tofield-inp').value;
+      const type      = document.getElementById('rel-type-inp').value;
+      if (!fromDb || !fromField || !toDb || !toField) {
+        return toast('Fill in all four From / To fields', 'error');
+      }
+      try {
+        await api('POST', '/relationships', { name, fromDb, fromField, toDb, toField, type });
+        closeModal();
+        toast('Relationship created!', 'success');
+        renderRelList();
+        populateRelFromDb();
+      } catch (err) { toast(err.message, 'error'); }
+    }, 'Create');
+
+  // Store dbs for the dynamic field loader
+  window._relModalDbs = dbs;
+  window._relFieldOpts = relFieldOpts;
+};
+
+function updateRelFieldOpts() {
+  const dbs        = window._relModalDbs || [];
+  const fromId     = document.getElementById('rel-from-inp')?.value;
+  const toId       = document.getElementById('rel-to-inp')?.value;
+  const fromSel    = document.getElementById('rel-fromfield-inp');
+  const toSel      = document.getElementById('rel-tofield-inp');
+
+  function buildOpts(dbId) {
+    const d = dbs.find(x => x.id === dbId);
+    if (!d) return '<option value="">— pick database first —</option>';
+    const sys = ['id','createdBy','createdAt','updatedAt'];
+    return [...sys, ...d.fields.map(f => f.name)]
+      .map(n => `<option value="${n}">${n}</option>`).join('');
+  }
+
+  if (fromSel) fromSel.innerHTML = buildOpts(fromId);
+  if (toSel)   toSel.innerHTML   = buildOpts(toId);
+}
+
+async function deleteRelationship(id, name) {
+  openModal('Delete Relationship',
+    `<p>Delete relationship <b>${esc(name)}</b>?<br>
+     <span style="color:var(--text-muted);font-size:.84rem">The databases and records themselves are not affected.</span></p>`,
+    async () => {
+      try {
+        await api('DELETE', `/relationships/${id}`);
+        closeModal();
+        toast('Relationship deleted', 'success');
+        renderRelList();
+        populateRelFromDb();
+      } catch (err) { toast(err.message, 'error'); }
+    }, 'Delete');
+}
+
+// ── Join Explorer ─────────────────────────────────────────────────────────────
+async function populateRelFromDb() {
+  let dbs = [];
+  try { dbs = await api('GET', '/databases'); } catch (_) {}
+  const sel = document.getElementById('rel-from-db');
+  if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">— select a database —</option>' +
+    dbs.map(d => `<option value="${d.id}"${d.id===cur?' selected':''}>${esc(d.name)}</option>`).join('');
+  window._relAllDbs = dbs;
+}
+
+function wireRelExplorer() {
+  document.getElementById('btn-add-join').onclick   = addJoinRow;
+  document.getElementById('btn-add-where').onclick  = addWhereRow;
+  document.getElementById('btn-run-join').onclick   = runJoin;
+}
+
+function addJoinRow() {
+  const dbs    = window._relAllDbs || [];
+  const dbOpts = dbs.map(d => `<option value="${d.id}">${esc(d.name)}</option>`).join('');
+  const idx    = ++_joinCount;
+  const list   = document.getElementById('rel-joins-list');
+  const row    = document.createElement('div');
+  row.className = 'rel-join-row';
+  row.id        = `rel-join-${idx}`;
+  row.innerHTML = `
+    <div class="rel-join-inner">
+      <span class="rel-join-label">JOIN</span>
+
+      <div class="rel-join-col">
+        <label class="rel-mini-label">From field</label>
+        <input class="rel-join-fromfield" type="text" placeholder="e.g. userId" style="width:110px" />
+      </div>
+      <span class="rel-arrow">→</span>
+      <div class="rel-join-col">
+        <label class="rel-mini-label">Database</label>
+        <select class="rel-join-todb" onchange="onJoinDbChange(${idx})">
+          <option value="">— pick —</option>${dbOpts}
+        </select>
+      </div>
+      <div class="rel-join-col">
+        <label class="rel-mini-label">On field</label>
+        <select class="rel-join-tofield">
+          <option value="">id</option>
+        </select>
+      </div>
+      <div class="rel-join-col">
+        <label class="rel-mini-label">Alias</label>
+        <input class="rel-join-as" type="text" placeholder="as…" style="width:80px" />
+      </div>
+      <div class="rel-join-col">
+        <label class="rel-mini-label">Type</label>
+        <select class="rel-join-type" style="width:130px">
+          <option value="one-to-many">1 → N (array)</option>
+          <option value="one-to-one" >1 → 1 (object)</option>
+        </select>
+      </div>
+      <button class="btn-icon del rel-join-del" onclick="removeJoinRow(${idx})" title="Remove join">✕</button>
+    </div>`;
+  list.appendChild(row);
+}
+
+function onJoinDbChange(idx) {
+  const row    = document.getElementById(`rel-join-${idx}`);
+  const dbId   = row.querySelector('.rel-join-todb').value;
+  const dbs    = window._relAllDbs || [];
+  const d      = dbs.find(x => x.id === dbId);
+  const toSel  = row.querySelector('.rel-join-tofield');
+  if (!d) { toSel.innerHTML = '<option value="id">id</option>'; return; }
+  const sys = ['id','createdBy','createdAt','updatedAt'];
+  toSel.innerHTML = [...sys, ...d.fields.map(f => f.name)]
+    .map(n => `<option value="${n}">${n}</option>`).join('');
+}
+
+function removeJoinRow(idx) {
+  document.getElementById(`rel-join-${idx}`)?.remove();
+}
+
+function addWhereRow() {
+  const dbs    = window._relAllDbs || [];
+  const fromId = document.getElementById('rel-from-db').value;
+  const srcDb  = dbs.find(d => d.id === fromId);
+  const flds   = srcDb
+    ? ['id','createdBy','createdAt','updatedAt',...srcDb.fields.map(f=>f.name)]
+    : ['id'];
+
+  const idx  = ++_joinCount;
+  const list = document.getElementById('rel-where-list');
+  const row  = document.createElement('div');
+  row.className = 'rel-where-row';
+  row.id        = `rel-where-${idx}`;
+  row.innerHTML = `
+    <select class="rel-where-field">
+      ${flds.map(f=>`<option value="${f}">${f}</option>`).join('')}
+    </select>
+    <select class="rel-where-op">
+      <option value="=">=</option>
+      <option value="!=">≠</option>
+      <option value=">">></option>
+      <option value="<"><</option>
+    </select>
+    <input class="rel-where-val" type="text" placeholder="value" style="width:120px" />
+    <button class="btn-icon del" onclick="document.getElementById('rel-where-${idx}').remove()" title="Remove">✕</button>`;
+  list.appendChild(row);
+}
+
+async function runJoin() {
+  const fromDb = document.getElementById('rel-from-db').value;
+  if (!fromDb) return toast('Select a FROM database', 'error');
+
+  // Collect joins
+  const joinRows = [...document.querySelectorAll('.rel-join-row')];
+  const joins    = joinRows.map(row => ({
+    fromField: row.querySelector('.rel-join-fromfield').value.trim(),
+    toDb:      row.querySelector('.rel-join-todb').value,
+    toField:   row.querySelector('.rel-join-tofield').value || 'id',
+    as:        row.querySelector('.rel-join-as').value.trim() || undefined,
+    type:      row.querySelector('.rel-join-type').value,
+  })).filter(j => j.fromField && j.toDb);
+
+  // Collect where
+  const whereRows = [...document.querySelectorAll('.rel-where-row')];
+  const where     = {};
+  for (const row of whereRows) {
+    const field = row.querySelector('.rel-where-field').value;
+    const op    = row.querySelector('.rel-where-op').value;
+    const val   = row.querySelector('.rel-where-val').value;
+    if (!field || val === '') continue;
+    const key = op === '!=' ? `!${field}` : op === '>' ? `${field}>` : op === '<' ? `${field}<` : field;
+    where[key] = val;
+  }
+
+  const limit  = Number(document.getElementById('rel-limit').value) || 100;
+  const result = document.getElementById('rel-results');
+  const elapsed = document.getElementById('rel-elapsed');
+  result.innerHTML  = '<p class="empty-state">Running join…</p>';
+  elapsed.textContent = '';
+
+  try {
+    const res = await api('POST', '/relationships/join', { fromDb, joins, where, limit });
+    _joinRows = res.rows;
+    _joinCols = res.rows.length > 0 ? deriveJoinCols(res.rows) : [];
+    elapsed.textContent = `${res.rowCount} row${res.rowCount!==1?'s':''} · ${res.elapsed} ms`;
+    renderJoinResults(res);
+  } catch (err) {
+    result.innerHTML = `<p class="empty-state" style="color:var(--danger)">${esc(err.message)}</p>`;
+  }
+}
+
+function deriveJoinCols(rows) {
+  const keys = new Set();
+  for (const row of rows.slice(0, 20)) Object.keys(row).forEach(k => keys.add(k));
+  return [...keys];
+}
+
+function renderJoinResults(res) {
+  const wrap = document.getElementById('rel-results');
+  if (!res.rows || res.rows.length === 0) {
+    wrap.innerHTML = '<p class="empty-state">No matching records.</p>';
+    return;
+  }
+
+  const cols = _joinCols;
+
+  const renderCell = (val) => {
+    if (val === null || val === undefined) return '<span style="color:var(--text-muted)">null</span>';
+    if (Array.isArray(val)) {
+      if (val.length === 0) return '<span class="join-badge join-badge-empty">[ 0 ]</span>';
+      return `<details class="join-nested">
+        <summary class="join-badge join-badge-arr">[${val.length} record${val.length!==1?'s':''}]</summary>
+        <pre>${esc(JSON.stringify(val, null, 2))}</pre>
+      </details>`;
+    }
+    if (typeof val === 'object') {
+      return `<details class="join-nested">
+        <summary class="join-badge join-badge-obj">{ object }</summary>
+        <pre>${esc(JSON.stringify(val, null, 2))}</pre>
+      </details>`;
+    }
+    return esc(String(val));
+  };
+
+  wrap.innerHTML = `
+    ${res.truncated ? `<p class="rel-truncate-warn">&#9888; Results truncated to ${res.rows.length} rows (${res.rowCount} total).</p>` : ''}
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <span style="font-size:.8rem;color:var(--text-muted)">
+        ${res.rowCount} row${res.rowCount!==1?'s':''} from <strong>${esc(res.sourceDb)}</strong>
+        ${res.truncated ? `(showing ${res.rows.length})` : ''}
+      </span>
+      <button class="btn btn-xs btn-outline" onclick="exportJoinCSV()">&#8595; Export CSV</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>${cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead>
+        <tbody>${res.rows.map(row =>
+          `<tr>${cols.map(c => `<td>${renderCell(row[c])}</td>`).join('')}</tr>`
+        ).join('')}</tbody>
+      </table>
+    </div>`;
+}
+
+function exportJoinCSV() {
+  if (_joinRows.length === 0) return toast('No results to export', 'error');
+  const cols = _joinCols;
+  const lines = [
+    cols.join(','),
+    ..._joinRows.map(row => cols.map(c => {
+      const v = row[c];
+      const s = (v === null || v === undefined) ? '' :
+                (typeof v === 'object') ? JSON.stringify(v) : String(v);
+      return `"${s.replace(/"/g,'""')}"`;
+    }).join(',')),
+  ];
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+  const a    = document.createElement('a');
+  a.href     = URL.createObjectURL(blob);
+  a.download = `join_result_${Date.now()}.csv`;
+  a.click();
 }
 
 /* ── Utilities ─────────────────────────────────────────────────────────────── */

@@ -35,6 +35,7 @@ db.defaults({
   apiKeys:     [],   // { id, key, name, userId, createdAt, lastUsed }
   webhooks:    [],   // { id, event, url, name, secret, createdBy, createdAt, active }
   credentials: [],   // { id, name, value, description, createdBy, createdAt, updatedAt }
+  relationships: [], // { id, name, fromDb, fromField, toDb, toField, type, createdBy, createdAt }
 }).write();
 
 // ─── Activity log helper ──────────────────────────────────────────────────────
@@ -656,6 +657,189 @@ app.get('/api/stream/status', requireAuth, (req, res) => {
   res.json({ count: connections.length, connections });
 });
 
+// ─── Dynamic Relationship Engine ─────────────────────────────────────────────
+const REL_TYPES = ['one-to-one', 'one-to-many'];
+
+// ── CRUD ──────────────────────────────────────────────────────────────────────
+app.get('/api/relationships', requireAuth, (req, res) => {
+  const allDbs = db.get('databases').value();
+  const rels   = db.get('relationships').value().map(r => ({
+    ...r,
+    fromDbName:  allDbs.find(d => d.id === r.fromDb)?.name  || '(deleted)',
+    toDbName:    allDbs.find(d => d.id === r.toDb)?.name    || '(deleted)',
+    fromFields:  allDbs.find(d => d.id === r.fromDb)?.fields || [],
+    toFields:    allDbs.find(d => d.id === r.toDb)?.fields   || [],
+  }));
+  res.json(rels);
+});
+
+app.post('/api/relationships', requireMember, (req, res) => {
+  const user = getAuthUser(req);
+  const { name, fromDb, fromField, toDb, toField, type } = req.body;
+
+  if (!fromDb || !fromField || !toDb || !toField) {
+    return res.status(400).json({ error: 'fromDb, fromField, toDb, toField are required' });
+  }
+  if (!db.get('databases').find({ id: fromDb }).value()) {
+    return res.status(404).json({ error: 'Source database not found' });
+  }
+  if (!db.get('databases').find({ id: toDb }).value()) {
+    return res.status(404).json({ error: 'Target database not found' });
+  }
+  if (type && !REL_TYPES.includes(type)) {
+    return res.status(400).json({ error: `type must be one of: ${REL_TYPES.join(', ')}` });
+  }
+
+  const rel = {
+    id:        uuidv4(),
+    name:      (name || '').trim() || `${fromDb}.${fromField} → ${toDb}.${toField}`,
+    fromDb, fromField, toDb, toField,
+    type:      type || 'one-to-many',
+    createdBy: user.username,
+    createdAt: new Date().toISOString(),
+  };
+  db.get('relationships').push(rel).write();
+  logActivity('create_rel', user.username, rel.name, `Defined relationship "${rel.name}"`);
+  res.status(201).json(rel);
+});
+
+app.delete('/api/relationships/:id', requireMember, (req, res) => {
+  const user = getAuthUser(req);
+  const rel  = db.get('relationships').find({ id: req.params.id }).value();
+  if (!rel) return res.status(404).json({ error: 'Relationship not found' });
+  db.get('relationships').remove({ id: req.params.id }).write();
+  logActivity('delete_rel', user.username, rel.name, `Deleted relationship "${rel.name}"`);
+  res.json({ message: 'Relationship deleted' });
+});
+
+// ── Core join engine ──────────────────────────────────────────────────────────
+function flattenRecord(r) {
+  // Use the same field names as the query engine (id, createdBy, createdAt, updatedAt)
+  // so join specs like { toField: "id" } work naturally.
+  return { id: r.id, createdBy: r.createdBy, createdAt: r.createdAt, updatedAt: r.updatedAt, ...r.data };
+}
+
+function executeJoin({ fromDb: fromRef, joins, where, select, limit }) {
+  const allDbs     = db.get('databases').value();
+  const allRecords = db.get('records').value();
+
+  // Resolve source database by id or name
+  const srcDb = allDbs.find(d => d.id === fromRef || d.name === fromRef);
+  if (!srcDb) throw new Error(`Database "${fromRef}" not found`);
+
+  // Load + flatten source records
+  let rows = allRecords
+    .filter(r => r.databaseId === srcDb.id)
+    .map(flattenRecord);
+
+  // WHERE filters (simple equality on source fields)
+  if (where && typeof where === 'object') {
+    for (const [k, v] of Object.entries(where)) {
+      if (v === '' || v === null || v === undefined) continue;
+      // Support basic operators: key, !key, key>, key<
+      if (k.endsWith('>')) {
+        const f = k.slice(0, -1);
+        rows = rows.filter(r => Number(r[f]) > Number(v));
+      } else if (k.endsWith('<')) {
+        const f = k.slice(0, -1);
+        rows = rows.filter(r => Number(r[f]) < Number(v));
+      } else if (k.startsWith('!')) {
+        const f = k.slice(1);
+        rows = rows.filter(r => String(r[f]) !== String(v));
+      } else {
+        rows = rows.filter(r => String(r[k]).toLowerCase() === String(v).toLowerCase());
+      }
+    }
+  }
+
+  // Process each join spec
+  for (const join of (joins || [])) {
+    // Resolve join via saved relationship ID or inline spec
+    let fromField, toDbRef, toField, alias, joinType;
+
+    if (join.relationshipId) {
+      const saved = db.get('relationships').find({ id: join.relationshipId }).value();
+      if (!saved) continue;
+      fromField = saved.fromField;
+      toDbRef   = saved.toDb;
+      toField   = saved.toField;
+      alias     = join.as || allDbs.find(d => d.id === saved.toDb)?.name || 'joined';
+      joinType  = saved.type;
+    } else {
+      fromField = join.fromField;
+      toDbRef   = join.toDb;
+      toField   = join.toField;
+      alias     = join.as || toDbRef;
+      joinType  = join.type || 'one-to-many';
+    }
+
+    const toDB = allDbs.find(d => d.id === toDbRef || d.name === toDbRef);
+    if (!toDB) continue;
+
+    const toRecords = allRecords
+      .filter(r => r.databaseId === toDB.id)
+      .map(flattenRecord);
+
+    // Build an index on the target field for O(1) lookup
+    const idx = new Map();
+    for (const tr of toRecords) {
+      const key = String(tr[toField] ?? '');
+      if (!idx.has(key)) idx.set(key, []);
+      idx.get(key).push(tr);
+    }
+
+    rows = rows.map(row => {
+      const key     = String(row[fromField] ?? '');
+      const matches = idx.get(key) || [];
+      return {
+        ...row,
+        [alias]: joinType === 'one-to-one' ? (matches[0] || null) : matches,
+      };
+    });
+  }
+
+  // SELECT projection
+  if (select && Array.isArray(select) && select.length > 0) {
+    rows = rows.map(row => {
+      const out = {};
+      for (const f of select) {
+        if (f.includes('.')) {
+          const [ns, field] = f.split('.', 2);
+          if (row[ns] && !Array.isArray(row[ns])) {
+            out[f] = row[ns][field] ?? null;
+          } else if (Array.isArray(row[ns])) {
+            out[f] = row[ns].map(r => r[field] ?? null);
+          }
+        } else {
+          out[f] = row[f] ?? null;
+        }
+      }
+      return out;
+    });
+  }
+
+  const lim      = Math.min(Math.max(1, Number(limit) || 500), 2000);
+  const truncated = rows.length > lim;
+  return {
+    rows:     rows.slice(0, lim),
+    rowCount: rows.length,
+    truncated,
+    sourceDb: srcDb.name,
+  };
+}
+
+// POST /api/relationships/join — execute a dynamic join
+app.post('/api/relationships/join', requireAuth, (req, res) => {
+  const start = Date.now();
+  try {
+    const result  = executeJoin(req.body);
+    result.elapsed = Date.now() - start;
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 // GET /api/dashboard — aggregated stats for the admin dashboard
 app.get('/api/dashboard', requireAuth, (req, res) => {
@@ -683,12 +867,13 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
   }
 
   const stats = {
-    databases:   databases.length,
-    records:     records.length,
-    users:       isAdmin ? db.get('users').value().length : null,
-    apiKeys:     db.get('apiKeys').value().filter(k => isAdmin || k.userId === user.id).length,
-    webhooks:    isAdmin ? db.get('webhooks').value().length : null,
-    credentials: isAdmin ? db.get('credentials').value().length : null,
+    databases:     databases.length,
+    records:       records.length,
+    users:         isAdmin ? db.get('users').value().length : null,
+    apiKeys:       db.get('apiKeys').value().filter(k => isAdmin || k.userId === user.id).length,
+    webhooks:      isAdmin ? db.get('webhooks').value().length : null,
+    credentials:   isAdmin ? db.get('credentials').value().length : null,
+    relationships: db.get('relationships').value().length,
   };
 
   res.json({ stats, topDatabases, recentActivity, threatStats });

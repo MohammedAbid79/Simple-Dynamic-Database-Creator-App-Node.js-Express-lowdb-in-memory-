@@ -2386,3 +2386,229 @@ select option { background: var(--surface2); }
   word-break: break-all;
   font-family: 'Courier New', monospace;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   DYNAMIC RELATIONSHIP ENGINE VIEW
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.rel-section-title {
+  font-size: .78rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0 0 10px;
+}
+
+/* Relationship type badges */
+.rel-type-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+.rel-type-onetomany {
+  background: rgba(101,116,255,.13);
+  color: var(--accent-h);
+  border: 1px solid rgba(101,116,255,.28);
+}
+.rel-type-onetoone {
+  background: rgba(45,206,137,.11);
+  color: var(--success);
+  border: 1px solid rgba(45,206,137,.25);
+}
+
+.rel-field-code {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-family: 'Courier New', monospace;
+  font-size: .75rem;
+  color: var(--accent-h);
+}
+.rel-dot { color: var(--text-muted); margin: 0 1px; }
+.rel-arrow { color: var(--accent-h); font-weight: 700; font-size: .9rem; }
+
+/* ── Join Explorer ─────────────────────────────────────────────────────────── */
+.rel-explorer {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  margin-bottom: 18px;
+}
+
+.rel-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.rel-label {
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  min-width: 56px;
+}
+.rel-select {
+  flex: 1;
+  max-width: 280px;
+}
+
+.rel-add-btn {
+  align-self: flex-start;
+}
+
+/* Join row */
+.rel-join-row {
+  margin-top: 8px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+.rel-join-inner {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.rel-join-label {
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--accent-h);
+  padding-bottom: 4px;
+  min-width: 36px;
+}
+.rel-join-col {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.rel-mini-label {
+  font-size: .66rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.rel-join-del {
+  margin-bottom: 0;
+  align-self: flex-end;
+}
+
+/* Where row */
+.rel-where-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+.rel-where-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 6px 10px;
+}
+.rel-where-row select,
+.rel-where-row input {
+  background: transparent;
+  border: none;
+  padding: 2px 4px;
+  font-size: .8rem;
+  color: var(--text);
+  outline: none;
+  box-shadow: none;
+}
+.rel-where-op {
+  width: 50px !important;
+  text-align: center;
+  color: var(--accent-h) !important;
+  font-weight: 700;
+}
+
+/* Run row */
+.rel-run-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.rel-elapsed {
+  font-size: .78rem;
+  color: var(--text-muted);
+}
+
+/* ── Join Results ──────────────────────────────────────────────────────────── */
+.rel-results {
+  margin-top: 4px;
+}
+.rel-truncate-warn {
+  padding: 8px 14px;
+  background: rgba(255,193,77,.1);
+  border: 1px solid rgba(255,193,77,.3);
+  border-radius: 7px;
+  font-size: .8rem;
+  color: #ffa94d;
+  margin-bottom: 10px;
+}
+
+/* Nested object/array cells */
+.join-nested {
+  display: inline-block;
+}
+.join-nested summary {
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+.join-nested summary::-webkit-details-marker { display: none; }
+.join-nested pre {
+  margin: 6px 0 0;
+  padding: 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: .7rem;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: 'Courier New', monospace;
+  max-width: 380px;
+  max-height: 180px;
+  overflow: auto;
+}
+.join-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 20px;
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .03em;
+}
+.join-badge-arr {
+  background: rgba(101,116,255,.13);
+  color: var(--accent-h);
+  border: 1px solid rgba(101,116,255,.25);
+}
+.join-badge-obj {
+  background: rgba(45,206,137,.11);
+  color: var(--success);
+  border: 1px solid rgba(45,206,137,.22);
+}
+.join-badge-empty {
+  background: var(--surface2);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}

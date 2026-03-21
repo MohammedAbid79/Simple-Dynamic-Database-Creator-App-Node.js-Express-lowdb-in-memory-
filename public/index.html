@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FluxDB</title>
   <link rel="stylesheet" href="/fonts/inter.css" />
-  <link rel="stylesheet" href="/style.css?v=18" />
+  <link rel="stylesheet" href="/style.css?v=19" />
 </head>
 <body>
   <!-- ── App Shell ── -->
@@ -99,6 +99,17 @@
             <path d="M3 6l2.5-2.5"/>
           </svg>
           <span class="nav-label">Webhooks</span>
+        </button>
+
+        <button class="nav-btn" id="nav-relations" data-view="relations" title="Relationships" style="display:none">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="4"  cy="10" r="2.5"/>
+            <circle cx="16" cy="10" r="2.5"/>
+            <path d="M6.5 10h7"/>
+            <path d="M10 5l1.5 1.5"/>
+            <path d="M11.5 13.5L10 15"/>
+          </svg>
+          <span class="nav-label">Relations</span>
         </button>
 
         <button class="nav-btn" id="nav-credentials" data-view="credentials" title="Credentials Vault" style="display:none">
@@ -282,6 +293,63 @@
         </div>
       </div>
 
+      <!-- Relations View -->
+      <div id="view-relations" class="view">
+        <div class="view-header">
+          <h2>Relationships</h2>
+          <button id="btn-create-rel" class="btn btn-primary">+ New Relationship</button>
+        </div>
+        <p class="apikey-hint">
+          Define <strong>links between databases</strong> (like foreign keys) then run <strong>NoSQL joins</strong>
+          to merge related records — no SQL required.
+          Supports <strong>one-to-one</strong> and <strong>one-to-many</strong> cardinality.
+        </p>
+
+        <!-- Defined relationships -->
+        <h3 class="rel-section-title">Defined Relationships</h3>
+        <div id="rel-list" class="table-wrap"></div>
+
+        <!-- Join Explorer -->
+        <h3 class="rel-section-title" style="margin-top:28px">Join Explorer</h3>
+        <div class="rel-explorer">
+          <!-- FROM -->
+          <div class="rel-row">
+            <label class="rel-label">FROM</label>
+            <select id="rel-from-db" class="rel-select">
+              <option value="">— select a database —</option>
+            </select>
+          </div>
+
+          <!-- Joins -->
+          <div id="rel-joins-list"></div>
+          <button id="btn-add-join" class="btn btn-outline btn-sm rel-add-btn" style="margin-top:4px">+ Add Join</button>
+
+          <!-- WHERE -->
+          <div class="rel-row" style="margin-top:12px">
+            <label class="rel-label">WHERE</label>
+            <div id="rel-where-list" class="rel-where-list"></div>
+            <button id="btn-add-where" class="btn btn-ghost btn-xs" style="margin-left:6px">+ condition</button>
+          </div>
+
+          <!-- LIMIT -->
+          <div class="rel-row" style="margin-top:8px">
+            <label class="rel-label">LIMIT</label>
+            <input id="rel-limit" type="number" value="100" min="1" max="2000"
+              style="width:100px;padding:5px 8px;font-size:.82rem" />
+            <span style="color:var(--text-muted);font-size:.78rem;margin-left:6px">rows (max 2 000)</span>
+          </div>
+
+          <!-- Run -->
+          <div class="rel-run-row">
+            <button id="btn-run-join" class="btn btn-primary">&#9654; Run Join</button>
+            <span id="rel-elapsed" class="rel-elapsed"></span>
+          </div>
+        </div>
+
+        <!-- Results -->
+        <div id="rel-results" class="rel-results"></div>
+      </div>
+
       <!-- Backups View (admin only) -->
       <div id="view-backups" class="view">
         <div class="view-header">
@@ -416,6 +484,6 @@
   <!-- Toast -->
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/app.js?v=16"></script>
+  <script src="/app.js?v=17"></script>
 </body>
 </html>
