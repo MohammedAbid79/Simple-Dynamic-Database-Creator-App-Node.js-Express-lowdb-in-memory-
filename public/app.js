@@ -139,6 +139,7 @@ async function bootApp() {
   // Admin + member (not guest)
   document.getElementById('btn-create-db').style.display      = (isAdmin || isMember) ? '' : 'none';
   document.getElementById('btn-import-dataset').style.display = (isAdmin || isMember) ? '' : 'none';
+  document.getElementById('btn-from-template').style.display  = (isAdmin || isMember) ? '' : 'none';
   document.getElementById('nav-apikeys').style.display         = (isAdmin || isMember) ? '' : 'none';
   document.getElementById('nav-webhooks').style.display        = (isAdmin || isMember) ? '' : 'none';
   document.getElementById('btn-create-webhook').style.display  = (isAdmin || isMember) ? '' : 'none';
@@ -2892,3 +2893,271 @@ async function revokeShareLink(token, dbId, dbName) {
     openShareModal(dbId, dbName);
   } catch (err) { toast(err.message, 'error'); }
 }
+
+// ─── Database Templates Marketplace ─────────────────────────────────────────
+
+const DB_TEMPLATES = [
+  {
+    id: 'crm',
+    name: 'CRM',
+    icon: '👥',
+    category: 'Sales',
+    description: 'Track customers, contacts, and companies.',
+    defaultName: 'customers',
+    fields: [
+      { name: 'name',    type: 'string',  required: true  },
+      { name: 'email',   type: 'string',  required: true  },
+      { name: 'phone',   type: 'string',  required: false },
+      { name: 'company', type: 'string',  required: false },
+      { name: 'status',  type: 'string',  required: false },
+    ],
+  },
+  {
+    id: 'inventory',
+    name: 'Inventory',
+    icon: '📦',
+    category: 'Operations',
+    description: 'Manage products, stock levels, and pricing.',
+    defaultName: 'inventory',
+    fields: [
+      { name: 'product',  type: 'string',  required: true  },
+      { name: 'sku',      type: 'string',  required: false },
+      { name: 'price',    type: 'number',  required: true  },
+      { name: 'quantity', type: 'number',  required: true  },
+      { name: 'category', type: 'string',  required: false },
+    ],
+  },
+  {
+    id: 'expenses',
+    name: 'Expenses',
+    icon: '💰',
+    category: 'Finance',
+    description: 'Log and categorize team or personal expenses.',
+    defaultName: 'expenses',
+    fields: [
+      { name: 'title',    type: 'string',  required: true  },
+      { name: 'amount',   type: 'number',  required: true  },
+      { name: 'date',     type: 'date',    required: true  },
+      { name: 'category', type: 'string',  required: false },
+      { name: 'paid_by',  type: 'string',  required: false },
+    ],
+  },
+  {
+    id: 'bug-tracker',
+    name: 'Bug Tracker',
+    icon: '🐛',
+    category: 'Engineering',
+    description: 'Track issues, bugs, and their resolution status.',
+    defaultName: 'bugs',
+    fields: [
+      { name: 'title',      type: 'string',  required: true  },
+      { name: 'priority',   type: 'string',  required: true  },
+      { name: 'status',     type: 'string',  required: true  },
+      { name: 'assignee',   type: 'string',  required: false },
+      { name: 'reported_by',type: 'string',  required: false },
+    ],
+  },
+  {
+    id: 'job-applications',
+    name: 'Job Applications',
+    icon: '💼',
+    category: 'HR',
+    description: 'Track candidates, roles, and hiring pipeline.',
+    defaultName: 'job_applications',
+    fields: [
+      { name: 'company',  type: 'string',  required: true  },
+      { name: 'role',     type: 'string',  required: true  },
+      { name: 'status',   type: 'string',  required: true  },
+      { name: 'applied',  type: 'date',    required: false },
+      { name: 'notes',    type: 'string',  required: false },
+    ],
+  },
+  {
+    id: 'project-tasks',
+    name: 'Project Tasks',
+    icon: '✅',
+    category: 'Project Management',
+    description: 'Manage tasks, owners, and deadlines.',
+    defaultName: 'tasks',
+    fields: [
+      { name: 'task',      type: 'string',  required: true  },
+      { name: 'owner',     type: 'string',  required: false },
+      { name: 'due_date',  type: 'date',    required: false },
+      { name: 'status',    type: 'string',  required: true  },
+      { name: 'priority',  type: 'string',  required: false },
+    ],
+  },
+  {
+    id: 'events',
+    name: 'Events',
+    icon: '📅',
+    category: 'Marketing',
+    description: 'Plan and track events, venues, and attendance.',
+    defaultName: 'events',
+    fields: [
+      { name: 'event_name', type: 'string',  required: true  },
+      { name: 'date',       type: 'date',    required: true  },
+      { name: 'location',   type: 'string',  required: false },
+      { name: 'attendees',  type: 'number',  required: false },
+      { name: 'status',     type: 'string',  required: false },
+    ],
+  },
+  {
+    id: 'subscriptions',
+    name: 'Subscriptions',
+    icon: '🔄',
+    category: 'Finance',
+    description: 'Monitor recurring software or service costs.',
+    defaultName: 'subscriptions',
+    fields: [
+      { name: 'service',    type: 'string',  required: true  },
+      { name: 'cost',       type: 'number',  required: true  },
+      { name: 'billing',    type: 'string',  required: false },
+      { name: 'renewal',    type: 'date',    required: false },
+      { name: 'status',     type: 'string',  required: false },
+    ],
+  },
+  {
+    id: 'leads',
+    name: 'Sales Leads',
+    icon: '🎯',
+    category: 'Sales',
+    description: 'Capture and qualify inbound sales leads.',
+    defaultName: 'leads',
+    fields: [
+      { name: 'name',    type: 'string',  required: true  },
+      { name: 'email',   type: 'string',  required: true  },
+      { name: 'source',  type: 'string',  required: false },
+      { name: 'score',   type: 'number',  required: false },
+      { name: 'status',  type: 'string',  required: true  },
+    ],
+  },
+  {
+    id: 'content-calendar',
+    name: 'Content Calendar',
+    icon: '📝',
+    category: 'Marketing',
+    description: 'Schedule blog posts, social content, and campaigns.',
+    defaultName: 'content_calendar',
+    fields: [
+      { name: 'title',      type: 'string',  required: true  },
+      { name: 'channel',    type: 'string',  required: false },
+      { name: 'publish_date', type: 'date',  required: false },
+      { name: 'author',     type: 'string',  required: false },
+      { name: 'status',     type: 'string',  required: true  },
+    ],
+  },
+];
+
+const TEMPLATE_CATEGORIES = [...new Set(DB_TEMPLATES.map(t => t.category))];
+
+function openTemplateMarketplace() {
+  let activeCategory = 'All';
+  let selectedTemplate = null;
+
+  function renderCards(category) {
+    const filtered = category === 'All'
+      ? DB_TEMPLATES
+      : DB_TEMPLATES.filter(t => t.category === category);
+
+    return filtered.map(t => `
+      <div class="tpl-card${selectedTemplate?.id === t.id ? ' selected' : ''}"
+           onclick="selectTemplate('${t.id}')" data-id="${t.id}">
+        <div class="tpl-icon">${t.icon}</div>
+        <div class="tpl-info">
+          <div class="tpl-name">${esc(t.name)}</div>
+          <div class="tpl-desc">${esc(t.description)}</div>
+          <div class="tpl-fields">
+            ${t.fields.map(f => `<span class="tpl-field-chip">${esc(f.name)}</span>`).join('')}
+          </div>
+        </div>
+        <div class="tpl-category-tag">${esc(t.category)}</div>
+      </div>`).join('');
+  }
+
+  function categoryPills() {
+    const all = ['All', ...TEMPLATE_CATEGORIES];
+    return all.map(c => `
+      <button class="tpl-cat-pill${activeCategory === c ? ' active' : ''}"
+              onclick="filterTemplates('${esc(c)}')">${esc(c)}</button>`).join('');
+  }
+
+  const body = `
+    <style>
+      .tpl-cats { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px; }
+      .tpl-cat-pill {
+        padding:4px 12px; border-radius:20px; font-size:.78rem; font-weight:500;
+        border:1px solid var(--border); background:transparent; color:var(--text-muted);
+        cursor:pointer; transition:all .15s;
+      }
+      .tpl-cat-pill:hover  { border-color:var(--accent); color:var(--accent); }
+      .tpl-cat-pill.active { background:var(--accent); border-color:var(--accent); color:#fff; }
+      .tpl-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; max-height:380px; overflow-y:auto; margin-bottom:16px; }
+      @media(max-width:520px) { .tpl-grid { grid-template-columns:1fr; } }
+      .tpl-card {
+        display:flex; flex-direction:column; gap:6px;
+        background:var(--bg); border:1px solid var(--border); border-radius:10px;
+        padding:12px 14px; cursor:pointer; transition:all .15s; position:relative;
+      }
+      .tpl-card:hover  { border-color:var(--accent); }
+      .tpl-card.selected { border-color:var(--accent); background:rgba(99,102,241,.07); }
+      .tpl-icon { font-size:1.5rem; line-height:1; }
+      .tpl-name { font-weight:600; font-size:.9rem; }
+      .tpl-desc { font-size:.78rem; color:var(--text-muted); margin-top:2px; }
+      .tpl-fields { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
+      .tpl-field-chip {
+        padding:2px 7px; border-radius:10px; font-size:.7rem;
+        background:rgba(99,102,241,.1); color:var(--accent);
+        border:1px solid rgba(99,102,241,.2);
+      }
+      .tpl-category-tag {
+        position:absolute; top:10px; right:10px;
+        font-size:.65rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:.06em;
+      }
+      .tpl-name-row { display:flex; flex-direction:column; gap:4px; }
+      .tpl-name-row label { font-size:.8rem; color:var(--text-muted); }
+      .tpl-name-row input {
+        background:var(--bg); border:1px solid var(--border); color:var(--text);
+        padding:8px 10px; border-radius:7px; font-size:.875rem; width:100%; outline:none;
+      }
+      .tpl-name-row input:focus { border-color:var(--accent); }
+    </style>
+    <div class="tpl-cats" id="tpl-cats">${categoryPills()}</div>
+    <div class="tpl-grid" id="tpl-grid">${renderCards('All')}</div>
+    <div class="tpl-name-row">
+      <label>Database name</label>
+      <input id="tpl-db-name" type="text" placeholder="Choose a name for your database…">
+    </div>`;
+
+  // Expose helpers to onclick handlers
+  window.filterTemplates = (cat) => {
+    activeCategory = cat;
+    document.getElementById('tpl-cats').innerHTML = categoryPills();
+    document.getElementById('tpl-grid').innerHTML = renderCards(cat);
+  };
+
+  window.selectTemplate = (id) => {
+    selectedTemplate = DB_TEMPLATES.find(t => t.id === id) || null;
+    document.querySelectorAll('.tpl-card').forEach(el => {
+      el.classList.toggle('selected', el.dataset.id === id);
+    });
+    const nameInput = document.getElementById('tpl-db-name');
+    if (nameInput && selectedTemplate && !nameInput.value) {
+      nameInput.value = selectedTemplate.defaultName;
+    }
+  };
+
+  openModal('🧩 Template Marketplace', body, async () => {
+    if (!selectedTemplate) return toast('Pick a template first', 'error');
+    const name = document.getElementById('tpl-db-name').value.trim();
+    if (!name) return toast('Database name is required', 'error');
+    try {
+      await api('POST', '/databases', { name, fields: selectedTemplate.fields });
+      closeModal();
+      toast(`✅ "${name}" created from ${selectedTemplate.name} template!`, 'success');
+      loadDatabases();
+    } catch (err) { toast(err.message, 'error'); }
+  }, 'Create Database');
+}
+
+document.getElementById('btn-from-template').onclick = openTemplateMarketplace;
