@@ -46,6 +46,16 @@
           <span class="nav-label">Databases</span>
         </button>
 
+        <button class="nav-btn" id="nav-dbtemplates" data-view="dbtemplates" title="Templates">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="3" width="6" height="6" rx="1.2"/>
+            <rect x="11" y="3" width="6" height="6" rx="1.2"/>
+            <rect x="3" y="11" width="6" height="6" rx="1.2"/>
+            <path d="M11 14h6M14 11v6"/>
+          </svg>
+          <span class="nav-label">Templates</span>
+        </button>
+
         <button class="nav-btn" id="nav-users" data-view="users" title="Users" style="display:none">
           <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <circle cx="8" cy="6.5" r="3"/>
@@ -209,13 +219,29 @@
       <!-- Databases View -->
       <div id="view-databases" class="view">
         <div class="view-header">
-          <h2>Databases</h2>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <h2 style="margin:0;">Databases</h2>
+            <div id="db-scope-toggle" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden;display:inline-flex;">
+              <button id="db-scope-mine" class="scope-btn scope-btn-active" onclick="setDbScope('mine')">My Databases</button>
+              <button id="db-scope-all"  class="scope-btn" onclick="setDbScope('all')">All Tenants</button>
+            </div>
+          </div>
           <button id="btn-import-dataset" class="btn btn-outline" style="display:none">&#8679; Import Dataset</button>
           <button id="btn-from-template" class="btn btn-outline" style="display:none">&#9881; From Template</button>
           <button id="btn-schema-builder" class="btn btn-outline" style="display:none">&#9638; Schema Builder</button>
           <button id="btn-create-db" class="btn btn-primary" style="display:none">+ New Database</button>
         </div>
         <div id="db-list" class="grid-cards"></div>
+      </div>
+
+      <!-- Templates View -->
+      <div id="view-dbtemplates" class="view">
+        <div class="view-header">
+          <h2>System Templates</h2>
+          <button id="btn-create-tpl" class="btn btn-primary" style="display:none">+ Create Template</button>
+        </div>
+        <p class="apikey-hint">One-click database system templates. Instantiate any template to get a full set of databases pre-wired with relationships — isolated to your own tenant space.</p>
+        <div id="dbtpl-list"></div>
       </div>
 
       <!-- Users View (admin only) -->

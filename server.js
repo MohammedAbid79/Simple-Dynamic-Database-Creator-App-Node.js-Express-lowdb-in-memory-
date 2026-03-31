@@ -37,6 +37,7 @@ db.defaults({
   credentials: [],   // { id, name, value, description, createdBy, createdAt, updatedAt }
   relationships: [], // { id, name, fromDb, fromField, toDb, toField, type, createdBy, createdAt }
   shareLinks:  [],   // { id, token, databaseId, permission, label, createdBy, createdAt, expiresAt, accessCount }
+  dbTemplates: [],   // { id, name, description, category, icon, databases:[{name,fields}], relationships:[{fromDb,fromField,toDb,toField,type}], createdBy, createdAt }
 }).write();
 
 // ─── Activity log helper ──────────────────────────────────────────────────────
@@ -882,7 +883,17 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
 
 // ─── Database management ─────────────────────────────────────────────────────
 app.get('/api/databases', requireAuth, (req, res) => {
-  const dbs    = db.get('databases').value();
+  const user = getAuthUser(req);
+  let dbs = db.get('databases').value();
+
+  // Tenant isolation: non-admins only see their own databases.
+  // Admins see all by default; pass ?scope=mine to see only their own.
+  if (user.role !== 'admin') {
+    dbs = dbs.filter(d => d.createdBy === user.username);
+  } else if (req.query.scope === 'mine') {
+    dbs = dbs.filter(d => d.createdBy === user.username);
+  }
+
   const result = dbs.map(d => ({
     ...d,
     recordCount: db.get('records').filter({ databaseId: d.id }).value().length,
@@ -924,10 +935,9 @@ app.get('/api/databases/:id', requireAuth, (req, res) => {
   res.json(database);
 });
 
-app.put('/api/databases/:id', requireAdmin, (req, res) => {
+app.put('/api/databases/:id', requireMember, (req, res) => {
   const database = db.get('databases').find({ id: req.params.id }).value();
   if (!database) return res.status(404).json({ error: 'Database not found' });
-
   const { name, fields } = req.body;
   const updates = {};
 
@@ -951,17 +961,24 @@ app.put('/api/databases/:id', requireAdmin, (req, res) => {
   }
 
   const user = getAuthUser(req);
+  if (user.role !== 'admin' && database.createdBy !== user.username) {
+    return res.status(403).json({ error: 'You can only edit your own databases' });
+  }
   db.get('databases').find({ id: req.params.id }).assign(updates).write();
   logActivity('update_db', user.username, database.name, 'Updated database schema');
   res.json(db.get('databases').find({ id: req.params.id }).value());
 });
 
-app.delete('/api/databases/:id', requireAdmin, (req, res) => {
+app.delete('/api/databases/:id', requireMember, (req, res) => {
   const dbToDelete = db.get('databases').find({ id: req.params.id }).value();
   if (!dbToDelete) return res.status(404).json({ error: 'Database not found' });
 
+  const user = getAuthUser(req);
+  if (user.role !== 'admin' && dbToDelete.createdBy !== user.username) {
+    return res.status(403).json({ error: 'You can only delete your own databases' });
+  }
+
   const recCount = db.get('records').filter({ databaseId: req.params.id }).value().length;
-  const user     = getAuthUser(req);
   db.get('databases').remove({ id: req.params.id }).write();
   db.get('records').remove({ databaseId: req.params.id }).write();
   logActivity('delete_db', user.username, dbToDelete.name, `Deleted database and ${recCount} record(s)`);
@@ -2028,6 +2045,138 @@ setInterval(() => {
 // ─── Serve SPA ────────────────────────────────────────────────────────────────
 app.get('/login', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+// ─── Database Templates (admin-defined multi-database system templates) ───────
+
+// List all templates — any authenticated user can browse
+app.get('/api/db-templates', requireAuth, (req, res) => {
+  res.json(db.get('dbTemplates').value());
+});
+
+// Create template — admin only
+app.post('/api/db-templates', requireAdmin, (req, res) => {
+  const { name, description, category, icon, databases, relationships } = req.body;
+  if (!name || !Array.isArray(databases) || databases.length === 0) {
+    return res.status(400).json({ error: 'name and at least one database required' });
+  }
+  for (const d of databases) {
+    if (!d.name || !Array.isArray(d.fields) || d.fields.length === 0) {
+      return res.status(400).json({ error: `Database "${d.name || '?'}" needs at least one field` });
+    }
+    for (const f of d.fields) {
+      if (!f.name || !['string','number','boolean','date'].includes(f.type)) {
+        return res.status(400).json({ error: `Invalid field in "${d.name}": ${JSON.stringify(f)}` });
+      }
+    }
+  }
+  const user = getAuthUser(req);
+  const tpl = {
+    id:            uuidv4(),
+    name:          name.trim(),
+    description:   (description || '').trim(),
+    category:      (category || 'General').trim(),
+    icon:          (icon || '🗄️').trim(),
+    databases:     databases,
+    relationships: Array.isArray(relationships) ? relationships : [],
+    createdBy:     user.username,
+    createdAt:     new Date().toISOString(),
+  };
+  db.get('dbTemplates').push(tpl).write();
+  logActivity('create_db_template', user.username, tpl.name, `Created system template "${tpl.name}"`);
+  res.status(201).json(tpl);
+});
+
+// Update template — admin only
+app.put('/api/db-templates/:id', requireAdmin, (req, res) => {
+  const tpl = db.get('dbTemplates').find({ id: req.params.id }).value();
+  if (!tpl) return res.status(404).json({ error: 'Template not found' });
+  const { name, description, category, icon, databases, relationships } = req.body;
+  const updates = {};
+  if (name)          updates.name          = name.trim();
+  if (description !== undefined) updates.description = description.trim();
+  if (category)      updates.category      = category.trim();
+  if (icon)          updates.icon          = icon.trim();
+  if (Array.isArray(databases))     updates.databases     = databases;
+  if (Array.isArray(relationships)) updates.relationships = relationships;
+  db.get('dbTemplates').find({ id: req.params.id }).assign(updates).write();
+  res.json(db.get('dbTemplates').find({ id: req.params.id }).value());
+});
+
+// Delete template — admin only
+app.delete('/api/db-templates/:id', requireAdmin, (req, res) => {
+  const tpl = db.get('dbTemplates').find({ id: req.params.id }).value();
+  if (!tpl) return res.status(404).json({ error: 'Template not found' });
+  const user = getAuthUser(req);
+  db.get('dbTemplates').remove({ id: req.params.id }).write();
+  logActivity('delete_db_template', user.username, tpl.name, `Deleted system template "${tpl.name}"`);
+  res.json({ message: 'Template deleted' });
+});
+
+// Instantiate template — any authenticated member/above
+app.post('/api/db-templates/:id/instantiate', requireMember, (req, res) => {
+  const tpl = db.get('dbTemplates').find({ id: req.params.id }).value();
+  if (!tpl) return res.status(404).json({ error: 'Template not found' });
+
+  const user   = getAuthUser(req);
+  const prefix = (req.body.prefix || '').trim().replace(/[^a-z0-9_]/gi, '_').replace(/_+$/, '');
+
+  const makeName = n => prefix ? `${prefix}_${n}` : n;
+
+  // Check for name collisions in the caller's tenant space
+  const userDbs = db.get('databases').filter({ createdBy: user.username }).value().map(d => d.name);
+  const collisions = tpl.databases.filter(d => userDbs.includes(makeName(d.name)));
+  if (collisions.length) {
+    return res.status(409).json({
+      error: `Name collision: ${collisions.map(d => makeName(d.name)).join(', ')} already exist. Use a prefix.`,
+      collisions: collisions.map(d => makeName(d.name)),
+    });
+  }
+
+  // Create all databases
+  const nameToId = {};
+  const created  = [];
+  for (const tplDb of tpl.databases) {
+    const dbName = makeName(tplDb.name);
+    const newDb  = {
+      id:        uuidv4(),
+      name:      dbName,
+      fields:    tplDb.fields,
+      createdBy: user.username,
+      createdAt: new Date().toISOString(),
+    };
+    db.get('databases').push(newDb).write();
+    nameToId[tplDb.name] = newDb.id;
+    created.push(newDb);
+    fireWebhooks('database.created', { database: newDb.name, databaseId: newDb.id, triggeredBy: user.username });
+    broadcastWS('database_created', newDb.name, newDb.id, { createdBy: user.username });
+  }
+
+  // Create relationships between the newly created databases
+  const createdRels = [];
+  for (const rel of tpl.relationships) {
+    const fromDbId = nameToId[rel.fromDb];
+    const toDbId   = nameToId[rel.toDb];
+    if (!fromDbId || !toDbId) continue;
+    const newRel = {
+      id:         uuidv4(),
+      name:       `${makeName(rel.fromDb)}.${rel.fromField} → ${makeName(rel.toDb)}.${rel.toField}`,
+      fromDb:     fromDbId,
+      fromField:  rel.fromField,
+      toDb:       toDbId,
+      toField:    rel.toField,
+      type:       rel.type || 'one-to-many',
+      createdBy:  user.username,
+      createdAt:  new Date().toISOString(),
+    };
+    db.get('relationships').push(newRel).write();
+    createdRels.push(newRel);
+  }
+
+  logActivity('instantiate_template', user.username, tpl.name,
+    `Instantiated template "${tpl.name}" → ${created.length} database(s) created`);
+
+  res.status(201).json({ created, relationships: createdRels, template: tpl.name });
 });
 
 // ─── Share links ──────────────────────────────────────────────────────────────

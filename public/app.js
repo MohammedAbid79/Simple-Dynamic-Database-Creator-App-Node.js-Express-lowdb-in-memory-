@@ -89,6 +89,7 @@ document.querySelectorAll('.nav-btn[data-view]').forEach(btn => {
     if (btn.dataset.view === 'backups')     loadBackups();
     if (btn.dataset.view === 'stream')      initStreamView();
     if (btn.dataset.view === 'relations')   loadRelations();
+    if (btn.dataset.view === 'dbtemplates') loadDbTemplates();
   });
 });
 
@@ -133,8 +134,12 @@ async function bootApp() {
   document.getElementById('nav-credentials').style.display = isAdmin ? '' : 'none';
   document.getElementById('nav-backups').style.display     = isAdmin ? '' : 'none';
 
-  // Poll threat stats every 30s for admins so the badge stays fresh
-  if (isAdmin) setInterval(refreshThreatBadge, 30_000);
+  // Admin-only UI controls
+  if (isAdmin) {
+    document.getElementById('db-scope-toggle').style.display = '';
+    document.getElementById('btn-create-tpl').style.display  = '';
+    setInterval(refreshThreatBadge, 30_000);
+  }
 
   // Admin + member (not guest)
   document.getElementById('btn-create-db').style.display       = (isAdmin || isMember) ? '' : 'none';
@@ -348,23 +353,41 @@ document.getElementById('dash-qa-import').onclick = () => {
 /* ════════════════════════════════════════════════════════════════════════════
    DATABASE VIEW
    ════════════════════════════════════════════════════════════════════════════ */
+
+let _dbScope = 'mine'; // 'mine' | 'all'  (admin only)
+
+function setDbScope(scope) {
+  _dbScope = scope;
+  document.getElementById('db-scope-mine').classList.toggle('scope-btn-active', scope === 'mine');
+  document.getElementById('db-scope-all').classList.toggle('scope-btn-active', scope === 'all');
+  loadDatabases();
+}
+
 async function loadDatabases() {
-  const dbs  = await api('GET', '/databases');
+  const qs   = (_dbScope === 'all' && currentUser.role === 'admin') ? '?scope=all' : '';
+  const dbs  = await api('GET', `/databases${qs}`);
   const list = document.getElementById('db-list');
 
   if (dbs.length === 0) {
     const canCreate = currentUser.role === 'admin' || currentUser.role === 'member';
     list.innerHTML = `<div class="empty-state">
       ${canCreate
-        ? 'No databases yet. Click <b>+ New Database</b> to create one.'
-        : 'No databases available yet.'}
+        ? 'No databases yet. Click <b>+ New Database</b> to create one, or use <b>From Template</b> to start instantly.'
+        : 'No databases yet. Ask your admin to set up a template you can instantiate.'}
     </div>`;
     return;
   }
 
-  list.innerHTML = dbs.map(d => `
+  list.innerHTML = dbs.map(d => {
+    const isOwner = d.createdBy === currentUser.username;
+    const isAdmin = currentUser.role === 'admin';
+    const canModify = isAdmin || isOwner;
+    const ownerTag = (!isOwner && isAdmin)
+      ? `<span style="font-size:.65rem;background:rgba(245,158,11,.12);color:#f59e0b;border:1px solid rgba(245,158,11,.25);padding:1px 7px;border-radius:10px;margin-left:6px;">${esc(d.createdBy)}</span>`
+      : '';
+    return `
     <div class="db-card" data-id="${d.id}">
-      <div class="db-card-name">${esc(d.name)}</div>
+      <div class="db-card-name">${esc(d.name)}${ownerTag}</div>
       <div class="db-card-meta">Created by ${esc(d.createdBy)} &bull; ${fmtDate(d.createdAt)}</div>
       <div class="db-card-count"><span class="record-count-badge">${d.recordCount ?? 0} record${(d.recordCount ?? 0) !== 1 ? 's' : ''}</span></div>
       <div class="db-card-fields">
@@ -373,12 +396,13 @@ async function loadDatabases() {
       <div class="db-card-actions" onclick="event.stopPropagation()">
         <button class="btn btn-sm btn-outline" onclick="openRecords('${d.id}')">&#128202; Open</button>
         <button class="btn btn-sm btn-outline" onclick="openShareModal('${d.id}','${esc(d.name)}')">&#128279; Share</button>
-        ${currentUser.role === 'admin' ? `
+        ${canModify ? `
           <button class="btn btn-sm btn-outline" onclick="editDatabase('${d.id}')">&#9998; Edit</button>
           <button class="btn btn-sm btn-danger" onclick="deleteDatabase('${d.id}','${esc(d.name)}')">&#128465; Delete</button>
         ` : ''}
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 // ── Create database ─────────────────────────────────────────────────────────
@@ -4061,6 +4085,316 @@ document.getElementById('sb-deploy-btn').onclick      = sbDeploy;
     .sb-add-field:hover { border-color: var(--tbl-color, #6366f1); color: var(--tbl-color, #6366f1); }
     #sb-svg path { pointer-events: stroke; }
     #sb-svg path:hover { filter: brightness(1.3); }
+  `;
+  document.head.appendChild(s);
+}());
+
+// ─── System Templates View ────────────────────────────────────────────────────
+
+const TPL_CAT_COLORS = {
+  'CRM': '#6366f1', 'Content': '#8b5cf6', 'Engineering': '#ec4899',
+  'Finance': '#10b981', 'HR': '#06b6d4', 'E-Commerce': '#f59e0b',
+  'Operations': '#3b82f6', 'General': '#6b7280',
+};
+
+async function loadDbTemplates() {
+  const wrap = document.getElementById('dbtpl-list');
+  wrap.innerHTML = '<p class="empty-state">Loading…</p>';
+  try {
+    const tpls = await api('GET', '/db-templates');
+    if (!tpls.length) {
+      const hint = currentUser.role === 'admin'
+        ? 'No templates yet. Click <b>+ Create Template</b> to build a reusable system for your users.'
+        : 'No system templates available yet. Ask your admin to create some.';
+      wrap.innerHTML = `<div class="empty-state">${hint}</div>`;
+      return;
+    }
+
+    // Group by category
+    const groups = {};
+    for (const t of tpls) {
+      const cat = t.category || 'General';
+      (groups[cat] = groups[cat] || []).push(t);
+    }
+
+    wrap.innerHTML = Object.entries(groups).map(([cat, items]) => `
+      <div style="margin-bottom:32px;">
+        <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;color:var(--text-muted);margin-bottom:12px;font-weight:600;">${esc(cat)}</div>
+        <div class="grid-cards" style="grid-template-columns:repeat(auto-fill,minmax(320px,1fr));">
+          ${items.map(t => renderTplCard(t)).join('')}
+        </div>
+      </div>`).join('');
+  } catch (e) {
+    wrap.innerHTML = `<p class="empty-state" style="color:var(--danger)">${esc(e.message)}</p>`;
+  }
+}
+
+function renderTplCard(t) {
+  const isAdmin = currentUser.role === 'admin';
+  const catColor = TPL_CAT_COLORS[t.category] || '#6b7280';
+  const dbChips  = t.databases.map(d =>
+    `<span style="background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);color:#a5b4fc;padding:2px 8px;border-radius:10px;font-size:.72rem;">${esc(d.name)}</span>`
+  ).join('');
+  const adminBtns = isAdmin ? `
+    <button class="btn btn-sm btn-outline" onclick="openEditTplModal(${JSON.stringify(t.id)})">&#9998; Edit</button>
+    <button class="btn btn-sm btn-danger"  onclick="deleteTpl(${JSON.stringify(t.id)}, ${JSON.stringify(t.name)})">&#128465;</button>` : '';
+  return `
+    <div class="db-card" style="display:flex;flex-direction:column;gap:10px;">
+      <div style="display:flex;align-items:flex-start;gap:12px;">
+        <span style="font-size:2rem;line-height:1;flex-shrink:0;">${esc(t.icon || '🗄️')}</span>
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:700;font-size:.95rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            ${esc(t.name)}
+            <span style="background:${catColor}18;color:${catColor};border:1px solid ${catColor}44;padding:1px 8px;border-radius:10px;font-size:.65rem;font-weight:600;">${esc(t.category || 'General')}</span>
+          </div>
+          <div style="font-size:.8rem;color:var(--text-muted);margin-top:4px;line-height:1.4;">${esc(t.description || '')}</div>
+        </div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px;">${dbChips}</div>
+      <div style="font-size:.75rem;color:var(--text-muted);">
+        ${t.databases.length} database${t.databases.length !== 1 ? 's' : ''}
+        &bull; ${t.relationships.length} relationship${t.relationships.length !== 1 ? 's' : ''}
+        &bull; by ${esc(t.createdBy)}
+      </div>
+      <div class="db-card-actions" style="margin-top:auto;" onclick="event.stopPropagation()">
+        <button class="btn btn-sm btn-primary" onclick="openInstantiateModal(${JSON.stringify(t)})">&#9889; Instantiate</button>
+        ${adminBtns}
+      </div>
+    </div>`;
+}
+
+// ── Instantiate ───────────────────────────────────────────────────────────────
+function openInstantiateModal(tpl) {
+  const dbList = tpl.databases.map(d =>
+    `<li style="font-size:.82rem;color:var(--text-muted);padding:2px 0;">
+       <b style="color:var(--text);" id="preview-${d.name}">${esc(d.name)}</b>
+       — ${d.fields.length} field${d.fields.length !== 1 ? 's' : ''}
+     </li>`
+  ).join('');
+
+  const body = `
+    <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:16px;">
+      Creates a private copy of <b>${esc(tpl.name)}</b> inside your tenant space.
+    </p>
+    <div style="margin-bottom:16px;">
+      <label style="font-size:.8rem;color:var(--text-muted);display:block;margin-bottom:6px;">
+        Prefix <span style="color:var(--text-muted);font-weight:400;">(optional — useful if instantiating multiple times)</span>
+      </label>
+      <input id="tpl-prefix" type="text" placeholder='e.g. "mystore" → mystore_orders, mystore_products'
+        style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px 11px;border-radius:8px;font-size:.875rem;outline:none;"
+        oninput="updateInstantiatePreview(${JSON.stringify(tpl.databases.map(d => d.name))})">
+    </div>
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 16px;">
+      <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:8px;">Will create</div>
+      <ul style="list-style:none;padding:0;margin:0;">${dbList}</ul>
+      ${tpl.relationships.length ? `<div style="font-size:.75rem;color:var(--text-muted);margin-top:8px;">+ ${tpl.relationships.length} relationship${tpl.relationships.length !== 1 ? 's' : ''} auto-wired</div>` : ''}
+    </div>`;
+
+  openModal(`⚡ Instantiate "${tpl.name}"`, body, async () => {
+    const prefix = document.getElementById('tpl-prefix').value.trim();
+    try {
+      const result = await api('POST', `/db-templates/${tpl.id}/instantiate`, { prefix });
+      closeModal();
+      toast(`✅ Created ${result.created.length} database${result.created.length !== 1 ? 's' : ''}!`, 'success');
+      loadDatabases();
+      navigate('databases');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  }, '⚡ Create');
+}
+
+function updateInstantiatePreview(names) {
+  const prefix = document.getElementById('tpl-prefix')?.value.trim() || '';
+  for (const n of names) {
+    const el = document.getElementById(`preview-${n}`);
+    if (el) el.textContent = prefix ? `${prefix}_${n}` : n;
+  }
+}
+
+// ── Admin: Create / Edit template ─────────────────────────────────────────────
+function openCreateTplModal(existing) {
+  const edit = !!existing;
+  // Build databases section state
+  let tplDbs   = existing ? JSON.parse(JSON.stringify(existing.databases))   : [];
+  let tplRels  = existing ? JSON.parse(JSON.stringify(existing.relationships)): [];
+
+  function rebuildForm() {
+    const dbsHtml = tplDbs.map((d, di) => `
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <input class="tpl-db-name" data-di="${di}" value="${esc(d.name)}" placeholder="database name"
+            style="flex:1;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:5px 9px;border-radius:6px;font-size:.82rem;outline:none;"
+            oninput="tplUpdateDbName(${di},this.value)">
+          <button onclick="tplRemoveDb(${di})" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:.9rem;padding:2px 6px;">&#10005;</button>
+        </div>
+        ${d.fields.map((f, fi) => `
+          <div style="display:flex;gap:6px;margin-bottom:5px;align-items:center;">
+            <input value="${esc(f.name)}" placeholder="field name"
+              style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:5px;font-size:.78rem;outline:none;"
+              oninput="tplUpdateField(${di},${fi},'name',this.value)">
+            <select style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 7px;border-radius:5px;font-size:.78rem;outline:none;"
+                    onchange="tplUpdateField(${di},${fi},'type',this.value)">
+              ${['string','number','boolean','date'].map(t =>
+                `<option value="${t}"${f.type===t?' selected':''}>${t}</option>`).join('')}
+            </select>
+            <label style="font-size:.72rem;color:var(--text-muted);display:flex;align-items:center;gap:3px;cursor:pointer;">
+              <input type="checkbox" ${f.required?'checked':''} onchange="tplUpdateField(${di},${fi},'required',this.checked)"> Req
+            </label>
+            <button onclick="tplRemoveField(${di},${fi})" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:.8rem;">&#10005;</button>
+          </div>`).join('')}
+        <button onclick="tplAddField(${di})"
+          style="background:none;border:1px dashed var(--border);color:var(--text-muted);padding:3px 10px;border-radius:5px;font-size:.75rem;cursor:pointer;width:100%;margin-top:4px;">
+          + field</button>
+      </div>`).join('');
+
+    const dbNames = tplDbs.map(d => d.name);
+    const relHtml = tplRels.map((r, ri) => `
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap;">
+        <select style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:.78rem;outline:none;"
+                onchange="tplUpdateRel(${ri},'fromDb',this.value)">
+          ${dbNames.map(n=>`<option value="${n}"${r.fromDb===n?' selected':''}>${esc(n)}</option>`).join('')}
+        </select>
+        <input value="${esc(r.fromField)}" placeholder="field"
+          style="width:90px;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:.78rem;outline:none;"
+          oninput="tplUpdateRel(${ri},'fromField',this.value)">
+        <span style="color:var(--text-muted);font-size:.8rem;">→</span>
+        <select style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:.78rem;outline:none;"
+                onchange="tplUpdateRel(${ri},'toDb',this.value)">
+          ${dbNames.map(n=>`<option value="${n}"${r.toDb===n?' selected':''}>${esc(n)}</option>`).join('')}
+        </select>
+        <input value="${esc(r.toField)}" placeholder="field"
+          style="width:90px;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:.78rem;outline:none;"
+          oninput="tplUpdateRel(${ri},'toField',this.value)">
+        <select style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:.78rem;outline:none;"
+                onchange="tplUpdateRel(${ri},'type',this.value)">
+          <option value="one-to-many"${r.type==='one-to-many'?' selected':''}>1:N</option>
+          <option value="one-to-one"${r.type==='one-to-one'?' selected':''}>1:1</option>
+        </select>
+        <button onclick="tplRemoveRel(${ri})" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:.85rem;">&#10005;</button>
+      </div>`).join('');
+
+    document.getElementById('tpl-dbs-wrap').innerHTML  = dbsHtml;
+    document.getElementById('tpl-rels-wrap').innerHTML = relHtml ||
+      '<p style="font-size:.78rem;color:var(--text-muted);padding:4px 0;">No relationships defined.</p>';
+  }
+
+  // Expose mutation helpers to onclick handlers
+  window.tplUpdateDbName  = (di, v)       => { tplDbs[di].name = v; rebuildForm(); };
+  window.tplRemoveDb      = (di)          => { tplDbs.splice(di, 1); rebuildForm(); };
+  window.tplAddField      = (di)          => { tplDbs[di].fields.push({name:'',type:'string',required:false}); rebuildForm(); };
+  window.tplUpdateField   = (di, fi, k, v)=> { tplDbs[di].fields[fi][k] = v; };
+  window.tplRemoveField   = (di, fi)      => { tplDbs[di].fields.splice(fi,1); rebuildForm(); };
+  window.tplUpdateRel     = (ri, k, v)    => { tplRels[ri][k] = v; };
+  window.tplRemoveRel     = (ri)          => { tplRels.splice(ri, 1); rebuildForm(); };
+  window.tplAddDb         = ()            => {
+    tplDbs.push({ name: 'new_db', fields: [{ name: 'id', type: 'string', required: true }] });
+    rebuildForm();
+  };
+  window.tplAddRel = () => {
+    if (tplDbs.length < 2) return toast('Add at least 2 databases first', 'error');
+    tplRels.push({ fromDb: tplDbs[0].name, fromField: 'id', toDb: tplDbs[1].name, toField: 'id', type: 'one-to-many' });
+    rebuildForm();
+  };
+
+  const body = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
+      <div>
+        <label style="font-size:.78rem;color:var(--text-muted);display:block;margin-bottom:5px;">Template Name</label>
+        <input id="tpl-name" value="${esc(existing?.name||'')}" placeholder="e.g. E-Commerce Platform"
+          style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:7px;font-size:.875rem;outline:none;">
+      </div>
+      <div>
+        <label style="font-size:.78rem;color:var(--text-muted);display:block;margin-bottom:5px;">Category</label>
+        <input id="tpl-cat" value="${esc(existing?.category||'')}" placeholder="e.g. E-Commerce, HR, CRM"
+          style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:7px;font-size:.875rem;outline:none;">
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 3fr;gap:10px;margin-bottom:14px;">
+      <div>
+        <label style="font-size:.78rem;color:var(--text-muted);display:block;margin-bottom:5px;">Icon (emoji)</label>
+        <input id="tpl-icon" value="${esc(existing?.icon||'🗄️')}" maxlength="4"
+          style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:7px;font-size:1.3rem;text-align:center;outline:none;">
+      </div>
+      <div>
+        <label style="font-size:.78rem;color:var(--text-muted);display:block;margin-bottom:5px;">Description</label>
+        <input id="tpl-desc" value="${esc(existing?.description||'')}" placeholder="Short description of what this template is for"
+          style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:7px;font-size:.875rem;outline:none;">
+      </div>
+    </div>
+
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+      <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);font-weight:600;">Databases</div>
+      <button onclick="tplAddDb()" style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:3px 10px;border-radius:6px;font-size:.75rem;cursor:pointer;">+ Add Database</button>
+    </div>
+    <div id="tpl-dbs-wrap" style="max-height:260px;overflow-y:auto;margin-bottom:14px;"></div>
+
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+      <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);font-weight:600;">Relationships</div>
+      <button onclick="tplAddRel()" style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:3px 10px;border-radius:6px;font-size:.75rem;cursor:pointer;">+ Add Relationship</button>
+    </div>
+    <div id="tpl-rels-wrap"></div>`;
+
+  openModal(edit ? `Edit "${existing.name}"` : 'Create System Template', body, async () => {
+    const name = document.getElementById('tpl-name').value.trim();
+    if (!name) return toast('Template name is required', 'error');
+    if (!tplDbs.length) return toast('Add at least one database', 'error');
+    if (tplDbs.some(d => !d.name.trim())) return toast('All databases need a name', 'error');
+    if (tplDbs.some(d => !d.fields.length)) return toast('Each database needs at least one field', 'error');
+    if (tplDbs.some(d => d.fields.some(f => !f.name.trim()))) return toast('All fields need a name', 'error');
+
+    const payload = {
+      name,
+      category:      document.getElementById('tpl-cat').value.trim()  || 'General',
+      icon:          document.getElementById('tpl-icon').value.trim()  || '🗄️',
+      description:   document.getElementById('tpl-desc').value.trim(),
+      databases:     tplDbs,
+      relationships: tplRels,
+    };
+    try {
+      if (edit) {
+        await api('PUT', `/db-templates/${existing.id}`, payload);
+        toast('Template updated!', 'success');
+      } else {
+        await api('POST', '/db-templates', payload);
+        toast('Template created!', 'success');
+      }
+      closeModal();
+      loadDbTemplates();
+    } catch (err) { toast(err.message, 'error'); }
+  }, edit ? 'Save Changes' : 'Create Template');
+
+  // Must call rebuildForm AFTER openModal so the containers exist in DOM
+  setTimeout(rebuildForm, 10);
+  document.getElementById('modal-box').classList.add('modal-wide');
+}
+
+function openEditTplModal(id) {
+  api('GET', '/db-templates').then(tpls => {
+    const t = tpls.find(x => x.id === id);
+    if (t) openCreateTplModal(t);
+    else toast('Template not found', 'error');
+  });
+}
+
+async function deleteTpl(id, name) {
+  if (!confirm(`Delete template "${name}"? This won't affect already-instantiated databases.`)) return;
+  try {
+    await api('DELETE', `/db-templates/${id}`);
+    toast('Template deleted', 'success');
+    loadDbTemplates();
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+document.getElementById('btn-create-tpl').onclick = () => openCreateTplModal(null);
+
+// ── Scope toggle CSS ──────────────────────────────────────────────────────────
+(function() {
+  const s = document.createElement('style');
+  s.textContent = `
+    .scope-btn { background:none;border:none;color:var(--text-muted);padding:5px 13px;font-size:.78rem;cursor:pointer;transition:all .15s; }
+    .scope-btn:hover { color:var(--text); }
+    .scope-btn-active { background:var(--accent);color:#fff !important;border-radius:6px; }
   `;
   document.head.appendChild(s);
 }());
