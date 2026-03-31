@@ -212,6 +212,7 @@
           <h2>Databases</h2>
           <button id="btn-import-dataset" class="btn btn-outline" style="display:none">&#8679; Import Dataset</button>
           <button id="btn-from-template" class="btn btn-outline" style="display:none">&#9881; From Template</button>
+          <button id="btn-schema-builder" class="btn btn-outline" style="display:none">&#9638; Schema Builder</button>
           <button id="btn-create-db" class="btn btn-primary" style="display:none">+ New Database</button>
         </div>
         <div id="db-list" class="grid-cards"></div>
@@ -484,6 +485,42 @@
 
   <!-- Toast -->
   <div id="toast" class="toast hidden"></div>
+
+  <!-- ── Schema Builder Full-Screen Overlay ── -->
+  <div id="sb-overlay" style="display:none;position:fixed;inset:0;z-index:700;background:#0c0e1a;flex-direction:column;">
+
+    <!-- Toolbar -->
+    <div style="background:#141728;border-bottom:1px solid #252a3d;padding:10px 18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex-shrink:0;">
+      <span style="font-size:.95rem;font-weight:700;color:#dde2f2;margin-right:2px;">&#9638; Schema Builder</span>
+      <div style="width:1px;height:22px;background:#252a3d;"></div>
+      <button id="sb-add-table-btn" style="background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.35);color:#a5b4fc;padding:6px 13px;border-radius:7px;font-size:.82rem;cursor:pointer;">+ Add Table</button>
+      <div style="flex:1;"></div>
+      <label style="font-size:.75rem;color:#9ca3af;white-space:nowrap;">Relation type:</label>
+      <select id="sb-rel-type" style="background:#0c0e1a;border:1px solid #252a3d;color:#dde2f2;padding:5px 9px;border-radius:7px;font-size:.82rem;outline:none;">
+        <option value="one-to-many">1 : N  (one-to-many)</option>
+        <option value="one-to-one">1 : 1  (one-to-one)</option>
+        <option value="many-to-many">N : M  (many-to-many)</option>
+      </select>
+      <button id="sb-deploy-btn" style="background:#6366f1;border:none;color:#fff;padding:7px 16px;border-radius:8px;font-size:.85rem;font-weight:600;cursor:pointer;">&#9889; Deploy to FluxDB</button>
+      <button onclick="closeSchemaBuilder()" style="background:none;border:1px solid #252a3d;color:#9ca3af;padding:6px 12px;border-radius:7px;font-size:.82rem;cursor:pointer;">&#10005; Close</button>
+    </div>
+
+    <!-- Hint bar -->
+    <div style="background:#0f1120;border-bottom:1px solid #1a1e2e;padding:5px 18px;display:flex;gap:22px;flex-shrink:0;flex-wrap:wrap;">
+      <span style="font-size:.72rem;color:#6b7280;">&#128432; Drag table headers to move</span>
+      <span style="font-size:.72rem;color:#6b7280;">&#9679; Drag field dots to connect tables</span>
+      <span style="font-size:.72rem;color:#10b981;">&#10024; Types auto-suggested from field names</span>
+      <span style="font-size:.72rem;color:#6b7280;">Click a relation line to delete it</span>
+    </div>
+
+    <!-- Canvas -->
+    <div id="sb-canvas-wrap" style="flex:1;overflow:auto;position:relative;"
+         onmousemove="sbOnMouseMove(event)" onmouseup="sbOnMouseUp(event)">
+      <div id="sb-canvas" style="position:relative;width:2800px;height:1800px;">
+        <svg id="sb-svg" style="position:absolute;inset:0;width:100%;height:100%;overflow:visible;"></svg>
+      </div>
+    </div>
+  </div>
 
   <!-- ── API Docs Full-Screen Overlay ── -->
   <div id="apidoc-overlay" style="display:none;position:fixed;inset:0;z-index:500;background:#0c0e1a;overflow-y:auto;">

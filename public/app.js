@@ -137,9 +137,10 @@ async function bootApp() {
   if (isAdmin) setInterval(refreshThreatBadge, 30_000);
 
   // Admin + member (not guest)
-  document.getElementById('btn-create-db').style.display      = (isAdmin || isMember) ? '' : 'none';
-  document.getElementById('btn-import-dataset').style.display = (isAdmin || isMember) ? '' : 'none';
-  document.getElementById('btn-from-template').style.display  = (isAdmin || isMember) ? '' : 'none';
+  document.getElementById('btn-create-db').style.display       = (isAdmin || isMember) ? '' : 'none';
+  document.getElementById('btn-import-dataset').style.display  = (isAdmin || isMember) ? '' : 'none';
+  document.getElementById('btn-from-template').style.display   = (isAdmin || isMember) ? '' : 'none';
+  document.getElementById('btn-schema-builder').style.display  = (isAdmin || isMember) ? '' : 'none';
   document.getElementById('nav-apikeys').style.display         = (isAdmin || isMember) ? '' : 'none';
   document.getElementById('nav-webhooks').style.display        = (isAdmin || isMember) ? '' : 'none';
   document.getElementById('btn-create-webhook').style.display  = (isAdmin || isMember) ? '' : 'none';
@@ -3538,4 +3539,528 @@ function copyResponseJson(epId) {
     }
   `;
   document.head.appendChild(style);
+}());
+
+// ─── Visual Drag-and-Drop Schema Builder ─────────────────────────────────────
+
+const SB_PAL = ['#6366f1','#8b5cf6','#ec4899','#06b6d4','#10b981','#f59e0b','#3b82f6','#ef4444'];
+const SB_TW  = 264;   // table card width
+const SB_HH  = 44;    // header height
+const SB_FH  = 36;    // field row height
+
+let _sbTables = [];   // { id, name, x, y, color, dbId?, fields:[{id,name,type,required}] }
+let _sbRels   = [];   // { id, fromTbl, fromField, toTbl, toField, relType }
+let _sbCtr    = 0;
+let _sbDrag   = null; // { tblId, sx, sy, ox, oy }
+let _sbConn   = null; // { fromTbl, fromField, cx, cy }
+
+const sbId = () => `sb${++_sbCtr}`;
+
+// ── Type auto-suggester ───────────────────────────────────────────────────────
+function sbSuggestType(name) {
+  const n = name.toLowerCase();
+  if (/price|cost|amount|salary|budget|age|count|qty|quantity|score|total|rate|fee|size|weight|height|width|year|num/.test(n))
+    return 'number';
+  if (/date|_at$|_on$|time$|dob$|expir|deadline|birthday|created|updated/.test(n))
+    return 'date';
+  if (/^is_|^has_|active$|enabled$|verified$|visible$|published$|deleted$|archived$/.test(n))
+    return 'boolean';
+  return 'string';
+}
+
+// ── Open / Close ──────────────────────────────────────────────────────────────
+function openSchemaBuilder() {
+  _sbTables = []; _sbRels = []; _sbCtr = 0; _sbDrag = null; _sbConn = null;
+  document.getElementById('sb-overlay').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+
+  api('GET', '/databases').then(dbs => {
+    if (!dbs.length) {
+      sbAddTable(100, 90, false);
+    } else {
+      const cols = Math.min(dbs.length, 3);
+      dbs.forEach((db, i) => {
+        _sbTables.push({
+          id: sbId(), name: db.name, dbId: db.id,
+          x: 80 + (i % cols) * 320,
+          y: 80 + Math.floor(i / cols) * 300,
+          color: SB_PAL[i % SB_PAL.length],
+          fields: db.fields.map(f => ({ id: sbId(), name: f.name, type: f.type, required: !!f.required })),
+        });
+      });
+    }
+    sbRenderAll();
+  }).catch(() => { sbAddTable(100, 90, false); sbRenderAll(); });
+}
+
+function closeSchemaBuilder() {
+  document.getElementById('sb-overlay').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+// ── Table CRUD ────────────────────────────────────────────────────────────────
+function sbAddTable(x, y, doRender = true) {
+  const tbl = {
+    id: sbId(),
+    name: 'new_table',
+    x: x ?? 80 + (_sbTables.length % 3) * 320,
+    y: y ?? 80 + Math.floor(_sbTables.length / 3) * 300,
+    color: SB_PAL[_sbTables.length % SB_PAL.length],
+    fields: [{ id: sbId(), name: 'id', type: 'string', required: true }],
+  };
+  _sbTables.push(tbl);
+  if (doRender) {
+    sbRenderAll();
+    setTimeout(() => { const el = document.getElementById(`sbt-name-${tbl.id}`); if (el) { el.focus(); el.select(); } }, 40);
+  }
+  return tbl;
+}
+
+function sbDeleteTable(tblId, e) {
+  if (e) e.stopPropagation();
+  _sbTables = _sbTables.filter(t => t.id !== tblId);
+  _sbRels   = _sbRels.filter(r => r.fromTbl !== tblId && r.toTbl !== tblId);
+  sbRenderAll();
+}
+
+// ── Field CRUD ────────────────────────────────────────────────────────────────
+function sbAddField(tblId) {
+  const tbl = _sbTables.find(t => t.id === tblId);
+  if (!tbl) return;
+  const f = { id: sbId(), name: '', type: 'string', required: false };
+  tbl.fields.push(f);
+  sbRenderAll();
+  setTimeout(() => { const el = document.getElementById(`sbf-name-${f.id}`); if (el) el.focus(); }, 40);
+}
+
+function sbDeleteField(tblId, fieldId, e) {
+  if (e) e.stopPropagation();
+  const tbl = _sbTables.find(t => t.id === tblId);
+  if (!tbl) return;
+  tbl.fields = tbl.fields.filter(f => f.id !== fieldId);
+  _sbRels = _sbRels.filter(r =>
+    !(r.fromTbl === tblId && r.fromField === fieldId) &&
+    !(r.toTbl   === tblId && r.toField   === fieldId)
+  );
+  sbRenderAll();
+}
+
+function sbUpdateTableName(tblId, val) {
+  const tbl = _sbTables.find(t => t.id === tblId);
+  if (tbl) { tbl.name = val; sbUpdateSvg(); }
+}
+
+function sbUpdateFieldName(tblId, fieldId, val) {
+  const tbl = _sbTables.find(t => t.id === tblId);
+  if (!tbl) return;
+  const f = tbl.fields.find(x => x.id === fieldId);
+  if (!f) return;
+  f.name = val;
+  if (!f._manualType) {
+    const sug = sbSuggestType(val);
+    if (f.type !== sug) {
+      f.type = sug;
+      const sel = document.getElementById(`sbf-type-${fieldId}`);
+      if (sel) sel.value = sug;
+    }
+  }
+}
+
+function sbUpdateFieldType(tblId, fieldId, val) {
+  const tbl = _sbTables.find(t => t.id === tblId);
+  const f   = tbl?.fields.find(x => x.id === fieldId);
+  if (f) { f.type = val; f._manualType = true; }
+}
+
+function sbUpdateFieldReq(tblId, fieldId, val) {
+  const tbl = _sbTables.find(t => t.id === tblId);
+  const f   = tbl?.fields.find(x => x.id === fieldId);
+  if (f) f.required = val;
+}
+
+function sbDeleteRelation(relId) {
+  _sbRels = _sbRels.filter(r => r.id !== relId);
+  sbUpdateSvg();
+}
+
+// ── Drag (move tables) ────────────────────────────────────────────────────────
+function sbStartDrag(e, tblId) {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.tagName === 'SPAN') return;
+  e.preventDefault();
+  const tbl = _sbTables.find(t => t.id === tblId);
+  if (!tbl) return;
+  _sbDrag = { tblId, sx: e.clientX, sy: e.clientY, ox: tbl.x, oy: tbl.y };
+  document.getElementById(`sbt-${tblId}`)?.classList.add('sb-dragging');
+}
+
+function sbOnMouseMove(e) {
+  if (_sbDrag) {
+    const tbl = _sbTables.find(t => t.id === _sbDrag.tblId);
+    if (tbl) {
+      tbl.x = Math.max(0, _sbDrag.ox + (e.clientX - _sbDrag.sx));
+      tbl.y = Math.max(0, _sbDrag.oy + (e.clientY - _sbDrag.sy));
+      const el = document.getElementById(`sbt-${tbl.id}`);
+      if (el) { el.style.left = tbl.x + 'px'; el.style.top = tbl.y + 'px'; }
+      sbUpdateSvg();
+    }
+  }
+  if (_sbConn) {
+    const wrap = document.getElementById('sb-canvas-wrap');
+    const rect = wrap.getBoundingClientRect();
+    _sbConn.cx = e.clientX - rect.left + wrap.scrollLeft;
+    _sbConn.cy = e.clientY - rect.top  + wrap.scrollTop;
+    sbUpdateSvg();
+  }
+}
+
+function sbOnMouseUp(e) {
+  if (_sbDrag) {
+    document.getElementById(`sbt-${_sbDrag.tblId}`)?.classList.remove('sb-dragging');
+    _sbDrag = null;
+  }
+  if (_sbConn) { _sbConn = null; sbUpdateSvg(); }
+}
+
+// ── Connect (draw relations) ──────────────────────────────────────────────────
+function sbStartConnect(e, tblId, fieldId) {
+  e.stopPropagation(); e.preventDefault();
+  const wrap = document.getElementById('sb-canvas-wrap');
+  const rect = wrap.getBoundingClientRect();
+  _sbConn = {
+    fromTbl: tblId, fromField: fieldId,
+    cx: e.clientX - rect.left + wrap.scrollLeft,
+    cy: e.clientY - rect.top  + wrap.scrollTop,
+  };
+}
+
+function sbFinishConnect(e, tblId, fieldId) {
+  e.stopPropagation();
+  if (!_sbConn) return;
+  if (_sbConn.fromTbl === tblId && _sbConn.fromField === fieldId) {
+    _sbConn = null; sbUpdateSvg(); return;
+  }
+  _sbRels.push({
+    id: sbId(),
+    fromTbl: _sbConn.fromTbl, fromField: _sbConn.fromField,
+    toTbl:   tblId,           toField:   fieldId,
+    relType: document.getElementById('sb-rel-type').value,
+  });
+  _sbConn = null;
+  sbUpdateSvg();
+}
+
+// ── Position helpers ──────────────────────────────────────────────────────────
+function sbDotPos(tblId, fieldId, side) {
+  const tbl = _sbTables.find(t => t.id === tblId);
+  if (!tbl) return null;
+  const fi = tbl.fields.findIndex(f => f.id === fieldId);
+  if (fi < 0) return null;
+  return {
+    x: side === 'right' ? tbl.x + SB_TW : tbl.x,
+    y: tbl.y + SB_HH + fi * SB_FH + SB_FH / 2,
+  };
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function sbRenderAll() {
+  const canvas = document.getElementById('sb-canvas');
+  if (!canvas) return;
+  canvas.querySelectorAll('.sb-table').forEach(el => el.remove());
+  for (const tbl of _sbTables) {
+    const div = document.createElement('div');
+    div.className = 'sb-table';
+    div.id = `sbt-${tbl.id}`;
+    div.style.cssText = `left:${tbl.x}px;top:${tbl.y}px;--tbl-color:${tbl.color};`;
+    div.innerHTML = sbTableHtml(tbl);
+    canvas.appendChild(div);
+  }
+  sbUpdateSvg();
+}
+
+function sbTableHtml(tbl) {
+  const fields = tbl.fields.map(f => `
+    <div class="sb-field-row">
+      <span class="sb-dot" title="Drag to connect"
+            onmousedown="sbStartConnect(event,'${tbl.id}','${f.id}')"
+            onmouseup="sbFinishConnect(event,'${tbl.id}','${f.id}')">&#9679;</span>
+      <input class="sb-finput" id="sbf-name-${f.id}" value="${esc(f.name)}" placeholder="field name"
+             oninput="sbUpdateFieldName('${tbl.id}','${f.id}',this.value)"
+             onmousedown="event.stopPropagation()" />
+      <select class="sb-ftype" id="sbf-type-${f.id}"
+              onchange="sbUpdateFieldType('${tbl.id}','${f.id}',this.value)"
+              onmousedown="event.stopPropagation()">
+        ${['string','number','boolean','date'].map(t =>
+          `<option value="${t}"${f.type===t?' selected':''}>${t[0].toUpperCase()}</option>`
+        ).join('')}
+      </select>
+      <label class="sb-req" title="Required" onmousedown="event.stopPropagation()">
+        <input type="checkbox" ${f.required ? 'checked' : ''} onchange="sbUpdateFieldReq('${tbl.id}','${f.id}',this.checked)">R
+      </label>
+      <button class="sb-xbtn" onclick="sbDeleteField('${tbl.id}','${f.id}',event)" title="Remove">&#10005;</button>
+    </div>`).join('');
+
+  return `
+    <div class="sb-thead" onmousedown="sbStartDrag(event,'${tbl.id}')">
+      <input class="sb-tname" id="sbt-name-${tbl.id}" value="${esc(tbl.name)}"
+             oninput="sbUpdateTableName('${tbl.id}',this.value)" onmousedown="event.stopPropagation()">
+      ${tbl.dbId ? '<span class="sb-exists-tag">existing</span>' : ''}
+      <button class="sb-xbtn sb-xbtn-tbl" onclick="sbDeleteTable('${tbl.id}',event)" title="Delete table">&#10005;</button>
+    </div>
+    <div class="sb-tbody">${fields}</div>
+    <div class="sb-tfoot">
+      <button class="sb-add-field" onclick="sbAddField('${tbl.id}')">+ field</button>
+    </div>`;
+}
+
+// ── SVG Arrows ────────────────────────────────────────────────────────────────
+const SB_REL_COLOR = { 'one-to-one': '#6366f1', 'one-to-many': '#10b981', 'many-to-many': '#f59e0b' };
+const SB_REL_LABEL = { 'one-to-one': '1:1',     'one-to-many': '1:N',     'many-to-many': 'N:M'    };
+
+function sbUpdateSvg() {
+  const svg = document.getElementById('sb-svg');
+  if (!svg) return;
+
+  const defs = `<defs>
+    ${Object.entries(SB_REL_COLOR).map(([k, c]) => `
+      <marker id="sbm-${k}" markerWidth="9" markerHeight="9" refX="8" refY="4" orient="auto">
+        <polygon points="0 0,9 4,0 8" fill="${c}" />
+      </marker>`).join('')}
+  </defs>`;
+
+  const arrows = _sbRels.map(rel => {
+    const s = sbDotPos(rel.fromTbl, rel.fromField, 'right');
+    const t = sbDotPos(rel.toTbl,   rel.toField,   'left');
+    if (!s || !t) return '';
+    const col = SB_REL_COLOR[rel.relType] || '#6366f1';
+    const lbl = SB_REL_LABEL[rel.relType] || '?';
+    const dx  = Math.max(70, Math.abs(t.x - s.x) * 0.45);
+    const d   = `M${s.x},${s.y} C${s.x+dx},${s.y} ${t.x-dx},${t.y} ${t.x},${t.y}`;
+    const mx  = (s.x + t.x) / 2;
+    const my  = (s.y + t.y) / 2 - 12;
+    return `
+      <path d="${d}" fill="none" stroke="${col}" stroke-width="2" stroke-dasharray="6,3"
+            marker-end="url(#sbm-${rel.relType})" style="cursor:pointer;"
+            onclick="sbDeleteRelation('${rel.id}')"
+            onmouseenter="this.setAttribute('stroke-width','3')"
+            onmouseleave="this.setAttribute('stroke-width','2')" />
+      <rect x="${mx-16}" y="${my-8}" width="32" height="16" rx="4"
+            fill="#141728" stroke="${col}" stroke-width="1" style="pointer-events:none;" />
+      <text x="${mx}" y="${my+5}" text-anchor="middle" fill="${col}" font-size="10"
+            font-family="monospace" font-weight="700" style="pointer-events:none;">${lbl}</text>`;
+  }).join('');
+
+  const tempLine = _sbConn ? (() => {
+    const s = sbDotPos(_sbConn.fromTbl, _sbConn.fromField, 'right');
+    if (!s) return '';
+    return `
+      <line x1="${s.x}" y1="${s.y}" x2="${_sbConn.cx}" y2="${_sbConn.cy}"
+            stroke="#6366f1" stroke-width="2" stroke-dasharray="6,3" opacity=".75" style="pointer-events:none;" />
+      <circle cx="${s.x}" cy="${s.y}" r="5" fill="#6366f1" style="pointer-events:none;" />
+      <circle cx="${_sbConn.cx}" cy="${_sbConn.cy}" r="4" fill="#6366f1" opacity=".6" style="pointer-events:none;" />`;
+  })() : '';
+
+  svg.innerHTML = defs + arrows + tempLine;
+}
+
+// ── Deploy ────────────────────────────────────────────────────────────────────
+async function sbDeploy() {
+  const newTbls = _sbTables.filter(t => !t.dbId);
+  if (!_sbTables.length) return toast('Add at least one table first', 'error');
+  if (_sbTables.some(t => !t.name.trim()))              return toast('All tables need a name', 'error');
+  if (_sbTables.some(t => t.fields.some(f => !f.name.trim()))) return toast('All fields need a name', 'error');
+
+  const btn = document.getElementById('sb-deploy-btn');
+  btn.disabled = true; btn.textContent = 'Deploying…';
+
+  try {
+    // 1. Create new databases
+    for (const tbl of newTbls) {
+      const res = await api('POST', '/databases', {
+        name:   tbl.name.trim(),
+        fields: tbl.fields.map(f => ({ name: f.name.trim(), type: f.type, required: !!f.required })),
+      });
+      tbl.dbId = res.id;
+    }
+
+    // 2. Create relationships
+    let relOk = 0, relFail = 0;
+    for (const rel of _sbRels) {
+      const fTbl = _sbTables.find(t => t.id === rel.fromTbl);
+      const tTbl = _sbTables.find(t => t.id === rel.toTbl);
+      const fFld = fTbl?.fields.find(f => f.id === rel.fromField);
+      const tFld = tTbl?.fields.find(f => f.id === rel.toField);
+      if (!fTbl?.dbId || !tTbl?.dbId || !fFld || !tFld) { relFail++; continue; }
+
+      const pairs = rel.relType === 'many-to-many'
+        ? [ { from: fTbl.dbId, fromF: fFld.name, to: tTbl.dbId, toF: tFld.name, type: 'one-to-many' },
+            { from: tTbl.dbId, fromF: tFld.name, to: fTbl.dbId, toF: fFld.name, type: 'one-to-many' } ]
+        : [ { from: fTbl.dbId, fromF: fFld.name, to: tTbl.dbId, toF: tFld.name, type: rel.relType } ];
+
+      for (const p of pairs) {
+        try {
+          await api('POST', '/relationships', { fromDb: p.from, fromField: p.fromF, toDb: p.to, toField: p.toF, type: p.type });
+          relOk++;
+        } catch { relFail++; }
+      }
+    }
+
+    const created = newTbls.length;
+    toast(`✅ ${created} table${created!==1?'s':''} + ${relOk} relation${relOk!==1?'s':''} deployed!`, 'success');
+    if (relFail) toast(`${relFail} relation(s) skipped — check field names match`, 'error');
+    loadDatabases();
+    setTimeout(closeSchemaBuilder, 700);
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = '⚡ Deploy to FluxDB';
+  }
+}
+
+// ── Wire up buttons ───────────────────────────────────────────────────────────
+document.getElementById('btn-schema-builder').onclick = openSchemaBuilder;
+document.getElementById('sb-add-table-btn').onclick   = () => sbAddTable();
+document.getElementById('sb-deploy-btn').onclick      = sbDeploy;
+
+// ── Inject Schema Builder CSS ─────────────────────────────────────────────────
+(function injectSbStyles() {
+  const s = document.createElement('style');
+  s.textContent = `
+    #sb-overlay { display: none; }
+    .sb-table {
+      position: absolute;
+      width: ${SB_TW}px;
+      background: #141728;
+      border: 1px solid color-mix(in srgb, var(--tbl-color) 30%, #252a3d);
+      border-radius: 10px;
+      box-shadow: 0 4px 20px rgba(0,0,0,.5);
+      user-select: none;
+      z-index: 2;
+      transition: box-shadow .15s;
+    }
+    .sb-table:hover { box-shadow: 0 6px 28px rgba(0,0,0,.6); }
+    .sb-dragging { box-shadow: 0 10px 40px rgba(0,0,0,.7) !important; z-index: 10 !important; opacity: .92; }
+    .sb-thead {
+      padding: 0 8px 0 12px;
+      height: ${SB_HH}px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: grab;
+      background: color-mix(in srgb, var(--tbl-color) 12%, #141728);
+      border-bottom: 1px solid color-mix(in srgb, var(--tbl-color) 25%, #252a3d);
+      border-radius: 9px 9px 0 0;
+    }
+    .sb-thead:active { cursor: grabbing; }
+    .sb-tname {
+      flex: 1;
+      background: none;
+      border: none;
+      color: #dde2f2;
+      font-size: .88rem;
+      font-weight: 700;
+      outline: none;
+      min-width: 0;
+    }
+    .sb-tname:focus {
+      background: rgba(255,255,255,.05);
+      border-radius: 4px;
+      padding: 0 4px;
+    }
+    .sb-exists-tag {
+      font-size: .62rem;
+      background: rgba(16,185,129,.15);
+      color: #34d399;
+      border: 1px solid rgba(16,185,129,.3);
+      padding: 1px 6px;
+      border-radius: 10px;
+      flex-shrink: 0;
+    }
+    .sb-tbody { padding: 2px 0; }
+    .sb-field-row {
+      height: ${SB_FH}px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 0 8px;
+      border-bottom: 1px solid rgba(255,255,255,.04);
+    }
+    .sb-field-row:last-child { border-bottom: none; }
+    .sb-field-row:hover { background: rgba(255,255,255,.025); }
+    .sb-dot {
+      color: #4b5563;
+      font-size: .65rem;
+      cursor: crosshair;
+      flex-shrink: 0;
+      padding: 4px 2px;
+      transition: color .15s, transform .1s;
+      user-select: none;
+    }
+    .sb-dot:hover { color: var(--tbl-color, #6366f1); transform: scale(1.4); }
+    .sb-finput {
+      flex: 1;
+      background: none;
+      border: none;
+      color: #dde2f2;
+      font-size: .78rem;
+      outline: none;
+      min-width: 0;
+    }
+    .sb-finput:focus { background: rgba(255,255,255,.05); border-radius: 3px; padding: 0 3px; }
+    .sb-finput::placeholder { color: #374151; }
+    .sb-ftype {
+      background: rgba(99,102,241,.1);
+      border: 1px solid rgba(99,102,241,.2);
+      color: #a5b4fc;
+      font-size: .68rem;
+      border-radius: 5px;
+      padding: 2px 4px;
+      outline: none;
+      flex-shrink: 0;
+      cursor: pointer;
+    }
+    .sb-req {
+      font-size: .65rem;
+      color: #6b7280;
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      flex-shrink: 0;
+      cursor: pointer;
+    }
+    .sb-req input { accent-color: #6366f1; }
+    .sb-xbtn {
+      background: none;
+      border: none;
+      color: #374151;
+      font-size: .75rem;
+      cursor: pointer;
+      padding: 2px 4px;
+      border-radius: 4px;
+      flex-shrink: 0;
+      line-height: 1;
+      transition: color .15s, background .15s;
+    }
+    .sb-xbtn:hover { color: #ef4444; background: rgba(239,68,68,.1); }
+    .sb-xbtn-tbl:hover { color: #ef4444; }
+    .sb-tfoot {
+      padding: 5px 8px;
+      border-top: 1px solid rgba(255,255,255,.05);
+      border-radius: 0 0 9px 9px;
+    }
+    .sb-add-field {
+      background: none;
+      border: 1px dashed #374151;
+      color: #6b7280;
+      font-size: .75rem;
+      padding: 3px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      width: 100%;
+      transition: border-color .15s, color .15s;
+    }
+    .sb-add-field:hover { border-color: var(--tbl-color, #6366f1); color: var(--tbl-color, #6366f1); }
+    #sb-svg path { pointer-events: stroke; }
+    #sb-svg path:hover { filter: brightness(1.3); }
+  `;
+  document.head.appendChild(s);
 }());
