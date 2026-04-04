@@ -70,17 +70,46 @@ document.getElementById('sidebar-toggle').addEventListener('click', () => {
   document.getElementById('sidebar').classList.toggle('collapsed');
 });
 
-/* ── Theme toggle (light / dark) ────────────────────────────────────────────── */
+/* ── Theme picker (light / system / dark) ───────────────────────────────────── */
+let _sysMQ = null; // matchMedia watcher for "system" mode
+
+function applyThemePref(pref) {
+  const html = document.documentElement;
+  // Remove existing MQ listener if any
+  if (_sysMQ) {
+    _sysMQ.removeEventListener('change', _onSysChange);
+    _sysMQ = null;
+  }
+  if (pref === 'system') {
+    _sysMQ = window.matchMedia('(prefers-color-scheme: light)');
+    html.dataset.theme = _sysMQ.matches ? 'light' : 'dark';
+    _sysMQ.addEventListener('change', _onSysChange);
+  } else {
+    html.dataset.theme = pref; // 'light' or 'dark'
+  }
+  // Update active state on picker buttons
+  document.querySelectorAll('.theme-picker-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.themePick === pref);
+  });
+}
+
+function _onSysChange(e) {
+  document.documentElement.dataset.theme = e.matches ? 'light' : 'dark';
+}
+
+// Init on load
 (function initTheme() {
-  const saved = localStorage.getItem('fluxdb-theme') || 'dark';
-  document.documentElement.dataset.theme = saved;
+  const saved = localStorage.getItem('fluxdb-theme') || 'system';
+  applyThemePref(saved);
 })();
 
-document.getElementById('theme-toggle-btn').addEventListener('click', () => {
-  const html = document.documentElement;
-  const next = html.dataset.theme === 'light' ? 'dark' : 'light';
-  html.dataset.theme = next;
-  localStorage.setItem('fluxdb-theme', next);
+// Wire up picker buttons
+document.querySelectorAll('.theme-picker-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const pref = btn.dataset.themePick;
+    localStorage.setItem('fluxdb-theme', pref);
+    applyThemePref(pref);
+  });
 });
 
 /* ── Navigation ────────────────────────────────────────────────────────────── */

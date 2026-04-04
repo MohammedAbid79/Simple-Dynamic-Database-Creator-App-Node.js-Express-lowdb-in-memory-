@@ -68,40 +68,89 @@
 }
 
 /* ── Theme toggle button ──────────────────────────────────────────────────── */
-.theme-toggle {
+/* ── Theme picker (3-way segmented control) ───────────────────────────────── */
+.theme-picker {
+  display: flex;
+  align-items: center;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.theme-picker-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
+  width: 30px;
+  height: 26px;
+  border-radius: 6px;
   background: none;
-  border: 1px solid var(--border);
+  border: none;
   color: var(--text-muted);
   cursor: pointer;
-  transition: color var(--t) var(--ease), background var(--t) var(--ease), border-color var(--t) var(--ease);
+  transition:
+    color var(--t) var(--ease),
+    background var(--t) var(--ease),
+    box-shadow var(--t) var(--ease);
   flex-shrink: 0;
+  position: relative;
 }
-.theme-toggle:hover {
+.theme-picker-btn:hover:not(.active) {
   color: var(--text);
-  background: var(--surface2);
-  border-color: var(--border-h);
+  background: var(--surface3);
 }
-.theme-toggle svg { width: 17px; height: 17px; }
-/* Show moon in dark mode, sun in light mode */
-.theme-toggle .icon-moon { display: block; }
-.theme-toggle .icon-sun  { display: none; }
-[data-theme="light"] .theme-toggle .icon-moon { display: none; }
-[data-theme="light"] .theme-toggle .icon-sun  { display: block; }
+.theme-picker-btn.active {
+  background: var(--surface);
+  color: var(--accent);
+  box-shadow: 0 1px 4px rgba(0,0,0,.2), 0 0 0 1px var(--border-h);
+}
+.theme-picker-btn svg {
+  width: 15px;
+  height: 15px;
+  pointer-events: none;
+}
 
-/* collapsed sidebar — center theme toggle */
-#sidebar.collapsed .theme-toggle { width: 36px; }
-#sidebar.collapsed .theme-toggle-wrap { justify-content: center; }
+/* Tooltip on hover */
+.theme-picker-btn::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 7px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface3);
+  color: var(--text);
+  font-size: .68rem;
+  font-weight: 600;
+  letter-spacing: .02em;
+  padding: 3px 7px;
+  border-radius: 5px;
+  border: 1px solid var(--border-h);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .12s var(--ease);
+}
+.theme-picker-btn:hover::after { opacity: 1; }
 
-.theme-toggle-wrap {
+/* Collapsed sidebar — show picker centered, hide logout label */
+#sidebar.collapsed .theme-picker-wrap {
+  justify-content: center;
+}
+#sidebar.collapsed .theme-picker {
+  /* still full width for collapsed icons */
+}
+
+.theme-picker-wrap {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* Light mode active button tweak */
+[data-theme="light"] .theme-picker-btn.active {
+  box-shadow: 0 1px 4px rgba(0,0,0,.1), 0 0 0 1px var(--border);
 }
 
 @font-face {
