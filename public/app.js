@@ -70,6 +70,19 @@ document.getElementById('sidebar-toggle').addEventListener('click', () => {
   document.getElementById('sidebar').classList.toggle('collapsed');
 });
 
+/* ── Theme toggle (light / dark) ────────────────────────────────────────────── */
+(function initTheme() {
+  const saved = localStorage.getItem('fluxdb-theme') || 'dark';
+  document.documentElement.dataset.theme = saved;
+})();
+
+document.getElementById('theme-toggle-btn').addEventListener('click', () => {
+  const html = document.documentElement;
+  const next = html.dataset.theme === 'light' ? 'dark' : 'light';
+  html.dataset.theme = next;
+  localStorage.setItem('fluxdb-theme', next);
+});
+
 /* ── Navigation ────────────────────────────────────────────────────────────── */
 document.querySelectorAll('.nav-btn[data-view]').forEach(btn => {
   btn.addEventListener('click', () => {

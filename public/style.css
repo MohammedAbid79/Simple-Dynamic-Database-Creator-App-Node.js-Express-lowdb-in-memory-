@@ -2,7 +2,7 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  /* Backgrounds — slightly blue-tinted to avoid flat grey look */
+  /* Backgrounds — dark theme (default) */
   --bg:        #0c0e1a;
   --surface:   #131629;
   --surface2:  #1b1f38;
@@ -33,6 +33,75 @@
   --sidebar-w: 224px;
   --ease:      cubic-bezier(.4,0,.2,1);
   --t:         .18s;
+
+  /* Shadow tokens */
+  --shadow-sm: 0 1px 3px rgba(0,0,0,.35), 0 1px 2px rgba(0,0,0,.3);
+  --shadow-md: 0 4px 16px rgba(0,0,0,.45);
+  --shadow-lg: 0 12px 40px rgba(0,0,0,.6);
+}
+
+/* ── Light theme ──────────────────────────────────────────────────────────── */
+[data-theme="light"] {
+  --bg:        #f0f2f8;
+  --surface:   #ffffff;
+  --surface2:  #f5f6fb;
+  --surface3:  #e8eaf4;
+
+  --border:    #d8dce8;
+  --border-h:  #bcc1d8;
+
+  --accent:     #4f5de0;
+  --accent-h:   #6474f5;
+  --accent-dim: rgba(79,93,224,.1);
+
+  --danger:     #e05252;
+  --danger-dim: rgba(224,82,82,.1);
+  --success:    #1fb87a;
+  --warn:       #e07e20;
+
+  --text:       #1a1d2e;
+  --text-muted: #6b7280;
+
+  --shadow-sm: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.06);
+  --shadow-md: 0 4px 16px rgba(0,0,0,.1);
+  --shadow-lg: 0 12px 40px rgba(0,0,0,.15);
+}
+
+/* ── Theme toggle button ──────────────────────────────────────────────────── */
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color var(--t) var(--ease), background var(--t) var(--ease), border-color var(--t) var(--ease);
+  flex-shrink: 0;
+}
+.theme-toggle:hover {
+  color: var(--text);
+  background: var(--surface2);
+  border-color: var(--border-h);
+}
+.theme-toggle svg { width: 17px; height: 17px; }
+/* Show moon in dark mode, sun in light mode */
+.theme-toggle .icon-moon { display: block; }
+.theme-toggle .icon-sun  { display: none; }
+[data-theme="light"] .theme-toggle .icon-moon { display: none; }
+[data-theme="light"] .theme-toggle .icon-sun  { display: block; }
+
+/* collapsed sidebar — center theme toggle */
+#sidebar.collapsed .theme-toggle { width: 36px; }
+#sidebar.collapsed .theme-toggle-wrap { justify-content: center; }
+
+.theme-toggle-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 @font-face {
@@ -2611,4 +2680,116 @@ select option { background: var(--surface2); }
   background: var(--surface2);
   color: var(--text-muted);
   border: 1px solid var(--border);
+}
+
+/* ── Light theme adjustments ──────────────────────────────────────────────── */
+[data-theme="light"] .login-card {
+  box-shadow: 0 8px 32px rgba(0,0,0,.12), 0 2px 8px rgba(0,0,0,.08);
+}
+
+[data-theme="light"] #main-content {
+  background:
+    radial-gradient(ellipse 60% 35% at 80% 5%, rgba(79,93,224,.04) 0%, transparent 60%),
+    var(--bg);
+}
+
+[data-theme="light"] #login-screen {
+  background:
+    radial-gradient(ellipse 80% 55% at 65% 15%, rgba(79,93,224,.09) 0%, transparent 65%),
+    radial-gradient(ellipse 50% 40% at 15% 85%, rgba(31,184,122,.06) 0%, transparent 55%),
+    var(--bg);
+}
+
+[data-theme="light"] .sidebar-title {
+  background: linear-gradient(120deg, var(--text) 0%, #4a5280 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+[data-theme="light"] .card {
+  box-shadow: var(--shadow-sm);
+}
+
+[data-theme="light"] .modal-box {
+  box-shadow: 0 8px 32px rgba(0,0,0,.18), 0 2px 8px rgba(0,0,0,.1);
+}
+
+[data-theme="light"] .stat-card {
+  box-shadow: var(--shadow-sm);
+}
+
+[data-theme="light"] pre, [data-theme="light"] code,
+[data-theme="light"] .code-block, [data-theme="light"] .query-output {
+  background: #f0f2f8;
+  color: #2b2d42;
+}
+
+[data-theme="light"] input, [data-theme="light"] select,
+[data-theme="light"] textarea {
+  color-scheme: light;
+}
+
+[data-theme="light"] .threat-row.critical { background: rgba(224,82,82,.06); }
+[data-theme="light"] .threat-row.high     { background: rgba(224,126,32,.06); }
+
+[data-theme="light"] .db-card-owner-tag {
+  background: rgba(224,126,32,.12);
+  color: #b85c10;
+}
+
+[data-theme="light"] .role-admin  { background: rgba(79,93,224,.14); color: #4050cc; }
+[data-theme="light"] .role-member { background: rgba(224,126,32,.12); color: #a05010; }
+[data-theme="light"] .role-guest  { background: rgba(31,184,122,.12); color: #167a52; }
+
+[data-theme="light"] .nav-btn.active {
+  background: rgba(79,93,224,.08);
+  color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+[data-theme="light"] .user-avatar {
+  box-shadow: 0 2px 8px rgba(79,93,224,.25);
+}
+
+[data-theme="light"] .sidebar-header {
+  background: linear-gradient(180deg, var(--surface3) 0%, transparent 100%);
+}
+
+[data-theme="light"] .btn-primary {
+  box-shadow: 0 2px 8px rgba(79,93,224,.3);
+}
+
+[data-theme="light"] .db-card:hover {
+  box-shadow: 0 8px 32px rgba(79,93,224,.12), 0 2px 8px rgba(0,0,0,.08);
+}
+
+[data-theme="light"] .record-count-badge {
+  background: rgba(79,93,224,.08);
+  border-color: rgba(79,93,224,.18);
+  color: var(--accent);
+}
+
+[data-theme="light"] tbody tr:hover { background: rgba(79,93,224,.04); }
+
+[data-theme="light"] .badge-method-get    { background: rgba(31,184,122,.12); color: #148056; }
+[data-theme="light"] .badge-method-post   { background: rgba(79,93,224,.12);  color: #3a48b0; }
+[data-theme="light"] .badge-method-put    { background: rgba(224,126,32,.12); color: #a06010; }
+[data-theme="light"] .badge-method-delete { background: rgba(224,82,82,.12);  color: #b03030; }
+
+/* Smooth transition for theme switching */
+*, *::before, *::after {
+  transition:
+    background-color .22s cubic-bezier(.4,0,.2,1),
+    border-color .22s cubic-bezier(.4,0,.2,1),
+    color .22s cubic-bezier(.4,0,.2,1),
+    box-shadow .22s cubic-bezier(.4,0,.2,1);
+}
+/* but NOT transitions on animations/transforms (would break existing animations) */
+.screen, .view, .modal-box, .card, [class*="overlay"] {
+  transition:
+    background-color .22s cubic-bezier(.4,0,.2,1),
+    border-color .22s cubic-bezier(.4,0,.2,1),
+    color .22s cubic-bezier(.4,0,.2,1),
+    box-shadow .22s cubic-bezier(.4,0,.2,1);
 }
