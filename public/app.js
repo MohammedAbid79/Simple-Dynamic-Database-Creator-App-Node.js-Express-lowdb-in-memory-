@@ -91,6 +91,9 @@ function applyThemePref(pref) {
   document.querySelectorAll('.theme-picker-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.themePick === pref);
   });
+  // Update current label
+  const label = document.getElementById('theme-picker-current');
+  if (label) label.textContent = pref.charAt(0).toUpperCase() + pref.slice(1);
 }
 
 function _onSysChange(e) {
