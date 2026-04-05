@@ -77,25 +77,31 @@
   border-radius: 9px;
   padding: 3px;
   gap: 2px;
+  width: 100%;
 }
 
 .theme-picker-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 26px;
+  gap: 5px;
+  flex: 1;
+  height: 28px;
   border-radius: 6px;
   background: none;
   border: none;
   color: var(--text-muted);
   cursor: pointer;
+  font-family: inherit;
+  font-size: .72rem;
+  font-weight: 600;
+  letter-spacing: .01em;
   transition:
     color var(--t) var(--ease),
     background var(--t) var(--ease),
     box-shadow var(--t) var(--ease);
-  flex-shrink: 0;
   position: relative;
+  white-space: nowrap;
 }
 .theme-picker-btn:hover:not(.active) {
   color: var(--text);
@@ -107,46 +113,22 @@
   box-shadow: 0 1px 4px rgba(0,0,0,.2), 0 0 0 1px var(--border-h);
 }
 .theme-picker-btn svg {
-  width: 15px;
-  height: 15px;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
   pointer-events: none;
 }
-
-/* Tooltip on hover */
-.theme-picker-btn::after {
-  content: attr(data-tip);
-  position: absolute;
-  bottom: calc(100% + 7px);
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--surface3);
-  color: var(--text);
-  font-size: .68rem;
-  font-weight: 600;
-  letter-spacing: .02em;
-  padding: 3px 7px;
-  border-radius: 5px;
-  border: 1px solid var(--border-h);
-  white-space: nowrap;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity .12s var(--ease);
+.theme-picker-label {
+  line-height: 1;
 }
-.theme-picker-btn:hover::after { opacity: 1; }
 
-/* Collapsed sidebar — show picker centered, hide logout label */
-#sidebar.collapsed .theme-picker-wrap {
-  justify-content: center;
-}
+/* Collapsed sidebar — hide labels, center icons */
 #sidebar.collapsed .theme-picker {
-  /* still full width for collapsed icons */
+  padding: 3px;
+  gap: 1px;
 }
-
-.theme-picker-wrap {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
+#sidebar.collapsed .theme-picker-label { display: none; }
+#sidebar.collapsed .theme-picker-btn { height: 28px; }
 
 /* Light mode active button tweak */
 [data-theme="light"] .theme-picker-btn.active {
@@ -357,7 +339,7 @@ nav { scrollbar-width: thin; scrollbar-color: var(--border-h) transparent; }
 #sidebar.collapsed .brand { display: none; }
 #sidebar.collapsed .nav-btn { justify-content: center; padding: 11px 0; gap: 0; }
 #sidebar.collapsed .nav-label { display: none; }
-#sidebar.collapsed .sidebar-footer { align-items: center; padding: 12px 0; }
+#sidebar.collapsed .sidebar-footer { align-items: stretch; padding: 12px 6px; }
 #sidebar.collapsed .user-profile { flex-direction: column; gap: 0; }
 #sidebar.collapsed .user-info { display: none; }
 #sidebar.collapsed .logout-btn-inner .nav-label { display: none; }
