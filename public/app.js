@@ -71,49 +71,44 @@ document.getElementById('sidebar-toggle').addEventListener('click', () => {
 });
 
 /* ── Theme picker (light / system / dark) ───────────────────────────────────── */
-let _sysMQ = null; // matchMedia watcher for "system" mode
+const THEME_KEY = 'fluxdb-theme';
+let _sysMQ = null;
+const _pickerBtns = document.querySelectorAll('.theme-picker-btn');
+const _pickerLabel = document.getElementById('theme-picker-current');
+
+function _applyEffectiveTheme(isLight) {
+  document.documentElement.dataset.theme = isLight ? 'light' : 'dark';
+  if (_pickerLabel) _pickerLabel.textContent = isLight ? 'Light' : 'Dark';
+}
 
 function applyThemePref(pref) {
-  const html = document.documentElement;
-  // Remove existing MQ listener if any
   if (_sysMQ) {
     _sysMQ.removeEventListener('change', _onSysChange);
     _sysMQ = null;
   }
   if (pref === 'system') {
     _sysMQ = window.matchMedia('(prefers-color-scheme: light)');
-    html.dataset.theme = _sysMQ.matches ? 'light' : 'dark';
+    _applyEffectiveTheme(_sysMQ.matches);
+    if (_pickerLabel) _pickerLabel.textContent = 'System';
     _sysMQ.addEventListener('change', _onSysChange);
   } else {
-    html.dataset.theme = pref; // 'light' or 'dark'
+    document.documentElement.dataset.theme = pref;
+    if (_pickerLabel) _pickerLabel.textContent = pref === 'light' ? 'Light' : 'Dark';
   }
-  // Update active state on picker buttons
-  document.querySelectorAll('.theme-picker-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.themePick === pref);
-  });
-  // Update current label
-  const label = document.getElementById('theme-picker-current');
-  if (label) label.textContent = pref.charAt(0).toUpperCase() + pref.slice(1);
+  _pickerBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.themePick === pref));
 }
 
 function _onSysChange(e) {
-  document.documentElement.dataset.theme = e.matches ? 'light' : 'dark';
+  _applyEffectiveTheme(e.matches);
 }
 
-// Init on load
-(function initTheme() {
-  const saved = localStorage.getItem('fluxdb-theme') || 'system';
-  applyThemePref(saved);
-})();
+applyThemePref(localStorage.getItem(THEME_KEY) || 'system');
 
-// Wire up picker buttons
-document.querySelectorAll('.theme-picker-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const pref = btn.dataset.themePick;
-    localStorage.setItem('fluxdb-theme', pref);
-    applyThemePref(pref);
-  });
-});
+_pickerBtns.forEach(btn => btn.addEventListener('click', () => {
+  const pref = btn.dataset.themePick;
+  localStorage.setItem(THEME_KEY, pref);
+  applyThemePref(pref);
+}));
 
 /* ── Navigation ────────────────────────────────────────────────────────────── */
 document.querySelectorAll('.nav-btn[data-view]').forEach(btn => {

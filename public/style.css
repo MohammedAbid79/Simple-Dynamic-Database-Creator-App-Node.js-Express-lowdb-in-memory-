@@ -67,7 +67,6 @@
   --shadow-lg: 0 12px 40px rgba(0,0,0,.15);
 }
 
-/* ── Theme toggle button ──────────────────────────────────────────────────── */
 /* ── Theme picker (3-way segmented control) ───────────────────────────────── */
 .theme-picker {
   display: flex;
@@ -112,9 +111,6 @@
   flex-shrink: 0;
   pointer-events: none;
 }
-
-/* Text labels — hidden by default, revealed on active btn only via .current line */
-.theme-picker-label { display: none; }
 
 /* Small "current theme" label shown below the picker */
 .theme-picker-current {
@@ -2830,19 +2826,20 @@ select option { background: var(--surface2); }
 [data-theme="light"] .badge-method-put    { background: rgba(224,126,32,.12); color: #a06010; }
 [data-theme="light"] .badge-method-delete { background: rgba(224,82,82,.12);  color: #b03030; }
 
-/* Smooth transition for theme switching */
-*, *::before, *::after {
+/* Smooth theme-switch transitions — targeted to avoid overriding
+   existing per-element transitions and slowing down SVG/animation elements */
+body, #sidebar, #main-content,
+.card, .db-card, .stat-card,
+.modal-box, .modal-overlay,
+.nav-btn, .btn,
+.sidebar-header, .sidebar-footer, .user-profile,
+.theme-picker, .theme-picker-btn,
+input, select, textarea,
+table, thead th, tbody td, tr,
+.field-chip, .record-count-badge, .role-tag, .badge {
   transition:
-    background-color .22s cubic-bezier(.4,0,.2,1),
-    border-color .22s cubic-bezier(.4,0,.2,1),
-    color .22s cubic-bezier(.4,0,.2,1),
-    box-shadow .22s cubic-bezier(.4,0,.2,1);
-}
-/* but NOT transitions on animations/transforms (would break existing animations) */
-.screen, .view, .modal-box, .card, [class*="overlay"] {
-  transition:
-    background-color .22s cubic-bezier(.4,0,.2,1),
-    border-color .22s cubic-bezier(.4,0,.2,1),
-    color .22s cubic-bezier(.4,0,.2,1),
-    box-shadow .22s cubic-bezier(.4,0,.2,1);
+    background-color .22s var(--ease),
+    border-color .22s var(--ease),
+    color .22s var(--ease),
+    box-shadow .22s var(--ease);
 }
