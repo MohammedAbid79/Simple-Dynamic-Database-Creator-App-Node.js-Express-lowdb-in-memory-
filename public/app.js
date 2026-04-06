@@ -127,6 +127,7 @@ document.querySelectorAll('.nav-btn[data-view]').forEach(btn => {
     if (btn.dataset.view === 'webhooks')    loadWebhooks();
     if (btn.dataset.view === 'credentials') loadCredentials();
     if (btn.dataset.view === 'backups')     loadBackups();
+    if (btn.dataset.view === 'applogs')    loadAppLogs();
     if (btn.dataset.view === 'stream')      initStreamView();
     if (btn.dataset.view === 'relations')   loadRelations();
     if (btn.dataset.view === 'dbtemplates') loadDbTemplates();
@@ -173,6 +174,7 @@ async function bootApp() {
   document.getElementById('nav-threats').style.display     = isAdmin ? '' : 'none';
   document.getElementById('nav-credentials').style.display = isAdmin ? '' : 'none';
   document.getElementById('nav-backups').style.display     = isAdmin ? '' : 'none';
+  document.getElementById('nav-applogs').style.display     = isAdmin ? '' : 'none';
 
   // Admin-only UI controls
   if (isAdmin) {
@@ -4438,3 +4440,53 @@ document.getElementById('btn-create-tpl').onclick = () => openCreateTplModal(nul
   `;
   document.head.appendChild(s);
 }());
+
+// ─── App Logs view ────────────────────────────────────────────────────────────
+let _logLevel = '';
+
+async function loadAppLogs() {
+  const container = document.getElementById('log-entries');
+  container.innerHTML = '<p style="color:var(--text-muted);padding:20px 0">Loading…</p>';
+  try {
+    const params  = _logLevel ? `?level=${_logLevel}&limit=300` : '?limit=300';
+    const entries = await api('GET', `/logs${params}`);
+    if (!entries.length) {
+      container.innerHTML = '<p class="empty-state">No log entries found.</p>';
+      return;
+    }
+    container.innerHTML = entries.map(e => {
+      const lvl     = e.level || 'INFO';
+      const meta    = e.meta ? `<pre class="log-entry-meta">${esc(JSON.stringify(e.meta, null, 2))}</pre>` : '';
+      const tsShort = e.ts ? new Date(e.ts).toLocaleString() : '—';
+      return `<div class="log-entry log-entry-${lvl.toLowerCase()}">
+        <span class="log-badge log-badge-${lvl.toLowerCase()}">${esc(lvl)}</span>
+        <span class="log-entry-ts">${tsShort}</span>
+        <span class="log-entry-msg">${esc(e.msg || '')}</span>
+        ${meta}
+      </div>`;
+    }).join('');
+  } catch (err) {
+    container.innerHTML = `<p class="empty-state" style="color:var(--danger)">${esc(err.message)}</p>`;
+  }
+}
+
+// Level pill filter
+document.getElementById('log-level-pills').addEventListener('click', e => {
+  const btn = e.target.closest('.log-level-pill');
+  if (!btn) return;
+  document.querySelectorAll('.log-level-pill').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  _logLevel = btn.dataset.level;
+  loadAppLogs();
+});
+
+document.getElementById('btn-refresh-logs').onclick = loadAppLogs;
+
+document.getElementById('btn-clear-logs').onclick = () => {
+  openModal('Clear Logs', '<p>Delete all current log entries? Rotated files are kept.</p>',
+    async () => {
+      await api('DELETE', '/logs');
+      toast('Logs cleared', 'success');
+      loadAppLogs();
+    }, 'Clear');
+};

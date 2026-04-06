@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FluxDB</title>
   <link rel="stylesheet" href="/fonts/inter.css" />
-  <link rel="stylesheet" href="/style.css?v=24" />
+  <link rel="stylesheet" href="/style.css?v=25" />
 </head>
 <body>
   <!-- ── App Shell ── -->
@@ -160,6 +160,13 @@
             <line x1="10" y1="15" x2="10" y2="15.01"/>
           </svg>
           <span class="nav-label">Backups</span>
+        </button>
+
+        <button class="nav-btn" id="nav-applogs" data-view="applogs" title="App Logs" style="display:none">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 5h12M4 9h8M4 13h10M4 17h6"/>
+          </svg>
+          <span class="nav-label">App Logs</span>
         </button>
       </nav>
 
@@ -419,6 +426,24 @@
         <div id="backup-list"></div>
       </div>
 
+      <!-- App Logs View -->
+      <div id="view-applogs" class="view">
+        <div class="view-header">
+          <h2>App Logs</h2>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <div class="log-level-pills" id="log-level-pills">
+              <button class="log-level-pill active" data-level="">All</button>
+              <button class="log-level-pill" data-level="ERROR">Error</button>
+              <button class="log-level-pill" data-level="WARN">Warn</button>
+              <button class="log-level-pill" data-level="INFO">Info</button>
+            </div>
+            <button id="btn-refresh-logs" class="btn btn-outline btn-sm">&#8635; Refresh</button>
+            <button id="btn-clear-logs" class="btn btn-outline btn-sm" style="color:var(--danger)">&#128465; Clear</button>
+          </div>
+        </div>
+        <div id="log-entries"></div>
+      </div>
+
       <!-- Query Engine View -->
       <div id="view-query" class="view">
         <div class="view-header">
@@ -603,6 +628,6 @@
     </div>
   </div>
 
-  <script src="/app.js?v=22"></script>
+  <script src="/app.js?v=23"></script>
 </body>
 </html>

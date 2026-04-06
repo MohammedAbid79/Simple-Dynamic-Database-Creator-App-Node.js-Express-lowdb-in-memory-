@@ -13,6 +13,19 @@ const WebSocketServer = require('ws').Server;
 const swaggerUi  = require('swagger-ui-express');
 const swaggerSpec = require('./swagger');
 const alasql     = require('alasql');
+const log        = require('./logger');
+
+// ─── Process-level crash prevention ──────────────────────────────────────────
+// Keep the process alive on unhandled errors; log them so they can be diagnosed
+process.on('uncaughtException', err => {
+  log.error('Uncaught exception', { message: err.message, stack: err.stack });
+});
+
+process.on('unhandledRejection', (reason) => {
+  const msg   = reason instanceof Error ? reason.message : String(reason);
+  const stack = reason instanceof Error ? reason.stack   : undefined;
+  log.error('Unhandled promise rejection', { message: msg, stack });
+});
 
 // ─── Backup directory ─────────────────────────────────────────────────────────
 const BACKUP_DIR = path.join(__dirname, 'backup');
@@ -2433,8 +2446,37 @@ wss.on('connection', (ws, req) => {
   ws.on('error', () => wsClients.delete(client));
 });
 
+// ─── Application Logs API (admin only) ───────────────────────────────────────
+app.get('/api/logs', requireAdmin, (req, res) => {
+  const limit  = Math.min(parseInt(req.query.limit) || 200, 1000);
+  const level  = req.query.level;                      // optional filter: ERROR | WARN | INFO
+  let entries  = log.tail(limit * 2);                  // fetch extra so filter doesn't under-deliver
+  if (level) entries = entries.filter(e => e.level === level.toUpperCase());
+  res.json(entries.slice(-limit).reverse());           // newest first
+});
+
+app.delete('/api/logs', requireAdmin, (req, res) => {
+  log.clear();
+  res.json({ ok: true });
+});
+
+// ─── Express error middleware (must be last app.use) ──────────────────────────
+// Catches any error thrown synchronously inside a route handler
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  log.error('Unhandled route error', {
+    method:  req.method,
+    url:     req.originalUrl,
+    message: err.message,
+    stack:   err.stack,
+  });
+  if (res.headersSent) return;
+  res.status(err.status || 500).json({ error: 'Internal server error' });
+});
+
 server.listen(PORT, HOST, () => {
   const ips = getLocalIPs();
+  log.info('Server started', { port: PORT });
   console.log('\n╔══════════════════════════════════════════════╗');
   console.log('║      Dynamic Database Creator  ✓  RUNNING  ║');
   console.log('╚══════════════════════════════════════════════╝');

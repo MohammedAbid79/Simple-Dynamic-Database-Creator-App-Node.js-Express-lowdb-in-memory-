@@ -4,8 +4,8 @@
   "description": "Simple Dynamic Database Creator – Node.js + Express + lowdb in-memory with admin/guest roles",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js"
+    "start": "node watcher.js",
+    "server": "node server.js"
   },
   "repository": {
     "type": "git",
