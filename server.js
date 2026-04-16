@@ -451,92 +451,19 @@ function requireMember(req, res, next) {
   next();
 }
 
-// ─── Auth routes ─────────────────────────────────────────────────────────────
-app.post('/api/auth/login', loginLimiter, (req, res) => {
-  const { username, password } = req.body;
-  const user = db.get('users').find({ username }).value();
-  if (!user || !bcrypt.compareSync(password, user.password)) {
-    return res.status(401).json({ error: 'Invalid credentials' });
-  }
-  req.session.user = { id: user.id, username: user.username, role: user.role };
-  res.json({ username: user.username, role: user.role });
-});
+// ─── Route modules ────────────────────────────────────────────────────────────
+// Build a shared context object that route modules can destructure
+const _routeCtx = {
+  app, db, bcrypt, uuidv4, crypto, log, logActivity, getAuthUser,
+  requireAuth, requireAdmin, requireMember, loginLimiter,
+  _threatLog, _blockedIPs,
+};
 
-app.post('/api/auth/logout', (req, res) => {
-  req.session.destroy(() => res.json({ message: 'Logged out' }));
-});
-
-app.get('/api/auth/me', requireAuth, (req, res) => {
-  res.json(getAuthUser(req));
-});
-
-app.post('/api/auth/register', loginLimiter, (req, res) => {
-  const { username, password } = req.body;
-  if (!username || !password) {
-    return res.status(400).json({ error: 'Username and password are required' });
-  }
-  if (username.length < 3 || username.length > 32) {
-    return res.status(400).json({ error: 'Username must be 3–32 characters' });
-  }
-  if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
-    return res.status(400).json({ error: 'Username may only contain letters, numbers, _ and -' });
-  }
-  if (password.length < 6) {
-    return res.status(400).json({ error: 'Password must be at least 6 characters' });
-  }
-  if (db.get('users').find({ username }).value()) {
-    return res.status(409).json({ error: 'Username already taken' });
-  }
-  const newUser = { id: uuidv4(), username, password: bcrypt.hashSync(password, 10), role: 'member' };
-  db.get('users').push(newUser).write();
-  req.session.user = { id: newUser.id, username, role: 'member' };
-  res.status(201).json({ username, role: 'member' });
-});
-
-// ─── User management (admin only) ────────────────────────────────────────────
-app.get('/api/users', requireAdmin, (req, res) => {
-  const users = db.get('users')
-    .map(u => ({ id: u.id, username: u.username, role: u.role })).value();
-  res.json(users);
-});
-
-app.post('/api/users', requireAdmin, (req, res) => {
-  const { username, password, role } = req.body;
-  if (!username || !password || !['admin', 'member', 'guest'].includes(role)) {
-    return res.status(400).json({ error: 'username, password, and role (admin|member|guest) required' });
-  }
-  if (db.get('users').find({ username }).value()) {
-    return res.status(409).json({ error: 'Username already exists' });
-  }
-  const newUser = { id: uuidv4(), username, password: bcrypt.hashSync(password, 10), role };
-  db.get('users').push(newUser).write();
-  res.status(201).json({ id: newUser.id, username, role });
-});
-
-app.put('/api/users/:id', requireAdmin, (req, res) => {
-  const { password, role } = req.body;
-  const user = db.get('users').find({ id: req.params.id }).value();
-  if (!user) return res.status(404).json({ error: 'User not found' });
-  if (user.username === 'admin' && role && role !== 'admin') {
-    return res.status(400).json({ error: 'Cannot change role of default admin' });
-  }
-  const updates = {};
-  if (password) updates.password = bcrypt.hashSync(password, 10);
-  if (role && ['admin', 'member', 'guest'].includes(role)) updates.role = role;
-  db.get('users').find({ id: req.params.id }).assign(updates).write();
-  const updated = db.get('users').find({ id: req.params.id }).value();
-  res.json({ id: updated.id, username: updated.username, role: updated.role });
-});
-
-app.delete('/api/users/:id', requireAdmin, (req, res) => {
-  const user = db.get('users').find({ id: req.params.id }).value();
-  if (!user) return res.status(404).json({ error: 'User not found' });
-  if (user.username === 'admin' || user.username === 'guest') {
-    return res.status(400).json({ error: 'Cannot delete default system accounts' });
-  }
-  db.get('users').remove({ id: req.params.id }).write();
-  res.json({ message: 'User deleted' });
-});
+require('./routes/auth')(        _routeCtx);   // POST /api/auth/*
+require('./routes/users')(       _routeCtx);   // GET|POST|PUT|DELETE /api/users/*
+require('./routes/credentials')( _routeCtx);   // GET|POST|PUT|DELETE /api/credentials/*
+require('./routes/threats')(     _routeCtx);   // GET|DELETE /api/threats*
+require('./routes/logs')(        _routeCtx);   // GET|DELETE /api/logs
 
 // ─── API key management ───────────────────────────────────────────────────────
 app.get('/api/keys', requireMember, (req, res) => {
@@ -1515,36 +1442,7 @@ app.post('/api/webhooks/:id/test', requireMember, (req, res) => {
   res.json({ message: 'Test delivery triggered' });
 });
 
-// ─── Threat log endpoints (admin only) ────────────────────────────────────────
-app.get('/api/threats', requireAdmin, (req, res) => {
-  res.json([..._threatLog].reverse().slice(0, 200));
-});
-
-app.get('/api/threats/stats', requireAdmin, (req, res) => {
-  const since24h = new Date(Date.now() - 86_400_000).toISOString();
-  const byType     = {};
-  const bySeverity = {};
-  let blocked = 0;
-  for (const t of _threatLog) {
-    byType[t.type]         = (byType[t.type]         || 0) + 1;
-    bySeverity[t.severity] = (bySeverity[t.severity] || 0) + 1;
-    if (t.blocked) blocked++;
-  }
-  res.json({
-    total:        _threatLog.length,
-    last24h:      _threatLog.filter(t => t.timestamp >= since24h).length,
-    blocked,
-    activeBlocks: _blockedIPs.size,
-    byType,
-    bySeverity,
-  });
-});
-
-// DELETE /api/threats — clear threat log (admin)
-app.delete('/api/threats', requireAdmin, (req, res) => {
-  _threatLog.length = 0;
-  res.json({ message: 'Threat log cleared' });
-});
+// ─── Threat Monitor routes → routes/threats.js ───────────────────────────────
 
 // ─── Automatic REST API Generator (/api/v1) ───────────────────────────────────
 
@@ -1699,92 +1597,7 @@ app.delete('/api/v1/:slug/:id', requireMember, resolveSlug, (req, res) => {
   res.json({ message: 'Record deleted' });
 });
 
-// ─── Credentials Vault (admin only) ──────────────────────────────────────────
-
-// GET /api/credentials — list all credentials (values masked)
-app.get('/api/credentials', requireAdmin, (req, res) => {
-  const list = db.get('credentials').value().map(c => ({
-    ...c,
-    value: '••••••••',   // never send plaintext in the list
-  }));
-  res.json(list);
-});
-
-// POST /api/credentials — create a new credential
-app.post('/api/credentials', requireAdmin, (req, res) => {
-  const { name, value, description } = req.body;
-  if (!name || typeof name !== 'string' || !name.trim()) {
-    return res.status(400).json({ error: 'Credential name is required' });
-  }
-  if (!value || typeof value !== 'string') {
-    return res.status(400).json({ error: 'Credential value is required' });
-  }
-  if (db.get('credentials').find({ name: name.trim() }).value()) {
-    return res.status(409).json({ error: `A credential named "${name.trim()}" already exists` });
-  }
-  const user = getAuthUser(req);
-  const cred = {
-    id:          uuidv4(),
-    name:        name.trim(),
-    value,
-    description: (description || '').trim(),
-    createdBy:   user.username,
-    createdAt:   new Date().toISOString(),
-    updatedAt:   new Date().toISOString(),
-  };
-  db.get('credentials').push(cred).write();
-  logActivity('create_credential', user.username, cred.name, `Created credential "${cred.name}"`);
-  res.status(201).json({ ...cred, value: '••••••••' });
-});
-
-// GET /api/credentials/:id/reveal — return the plaintext value (audit logged)
-app.get('/api/credentials/:id/reveal', requireAdmin, (req, res) => {
-  const cred = db.get('credentials').find({ id: req.params.id }).value();
-  if (!cred) return res.status(404).json({ error: 'Credential not found' });
-  const user = getAuthUser(req);
-  logActivity('reveal_credential', user.username, cred.name, `Revealed credential "${cred.name}"`);
-  res.json({ id: cred.id, value: cred.value });
-});
-
-// PUT /api/credentials/:id — update name / value / description
-app.put('/api/credentials/:id', requireAdmin, (req, res) => {
-  const cred = db.get('credentials').find({ id: req.params.id }).value();
-  if (!cred) return res.status(404).json({ error: 'Credential not found' });
-
-  const { name, value, description } = req.body;
-  const updates = { updatedAt: new Date().toISOString() };
-
-  if (name !== undefined) {
-    const trimmed = String(name).trim();
-    if (!trimmed) return res.status(400).json({ error: 'Name cannot be empty' });
-    const conflict = db.get('credentials').find({ name: trimmed }).value();
-    if (conflict && conflict.id !== req.params.id) {
-      return res.status(409).json({ error: `A credential named "${trimmed}" already exists` });
-    }
-    updates.name = trimmed;
-  }
-  if (value !== undefined) {
-    if (!value) return res.status(400).json({ error: 'Value cannot be empty' });
-    updates.value = value;
-  }
-  if (description !== undefined) updates.description = String(description).trim();
-
-  db.get('credentials').find({ id: req.params.id }).assign(updates).write();
-  const updated = db.get('credentials').find({ id: req.params.id }).value();
-  const user = getAuthUser(req);
-  logActivity('update_credential', user.username, updated.name, `Updated credential "${updated.name}"`);
-  res.json({ ...updated, value: '••••••••' });
-});
-
-// DELETE /api/credentials/:id
-app.delete('/api/credentials/:id', requireAdmin, (req, res) => {
-  const cred = db.get('credentials').find({ id: req.params.id }).value();
-  if (!cred) return res.status(404).json({ error: 'Credential not found' });
-  const user = getAuthUser(req);
-  db.get('credentials').remove({ id: req.params.id }).write();
-  logActivity('delete_credential', user.username, cred.name, `Deleted credential "${cred.name}"`);
-  res.json({ message: 'Credential deleted' });
-});
+// ─── Credentials Vault routes → routes/credentials.js ────────────────────────
 
 // ─── Dataset Import ───────────────────────────────────────────────────────────
 // POST /api/import — create a database + bulk-insert records from an uploaded dataset
@@ -2446,19 +2259,7 @@ wss.on('connection', (ws, req) => {
   ws.on('error', () => wsClients.delete(client));
 });
 
-// ─── Application Logs API (admin only) ───────────────────────────────────────
-app.get('/api/logs', requireAdmin, (req, res) => {
-  const limit  = Math.min(parseInt(req.query.limit) || 200, 1000);
-  const level  = req.query.level;                      // optional filter: ERROR | WARN | INFO
-  let entries  = log.tail(limit * 2);                  // fetch extra so filter doesn't under-deliver
-  if (level) entries = entries.filter(e => e.level === level.toUpperCase());
-  res.json(entries.slice(-limit).reverse());           // newest first
-});
-
-app.delete('/api/logs', requireAdmin, (req, res) => {
-  log.clear();
-  res.json({ ok: true });
-});
+// ─── Application Logs routes → routes/logs.js ────────────────────────────────
 
 // ─── Express error middleware (must be last app.use) ──────────────────────────
 // Catches any error thrown synchronously inside a route handler

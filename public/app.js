@@ -3,6 +3,26 @@ let currentUser  = null;
 let currentDb    = null;   // active database object when in records view
 let allRecords   = [];     // full unfiltered record list for current db
 
+/* ── Shared SVG icon snippets for dynamically generated HTML ──────────────── */
+const IC = {
+  refresh:  `<svg class="bi" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 7a5 5 0 1 1-.9-2.9"/><polyline points="12 2 12 5 9 5"/></svg>`,
+  edit:     `<svg class="bi" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2.5l2 2L4 12H2v-2z"/><path d="M8 4l2 2"/></svg>`,
+  trash:    `<svg class="bi" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="1.5 3.5 12.5 3.5"/><path d="M4 3.5V2h6v1.5"/><path d="M5 6v4M9 6v4"/><path d="M2.5 3.5l.9 8.5h7.2l.9-8.5"/></svg>`,
+  copy:     `<svg class="bi" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="5" width="7" height="8" rx="1.2"/><path d="M9 5V3a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h2"/></svg>`,
+  share:    `<svg class="bi" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 8.5a3 3 0 0 0 4.2 0l2-2a3 3 0 0 0-4.2-4.2L6 3.8"/><path d="M8.5 5.5a3 3 0 0 0-4.2 0l-2 2a3 3 0 0 0 4.2 4.2L8 10.2"/></svg>`,
+  open:     `<svg class="bi" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2H3a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V8"/><path d="M9 2h3v3"/><path d="M14 0L7.5 6.5"/></svg>`,
+  play:     `<svg class="bi" viewBox="0 0 14 14" fill="currentColor" stroke="none" aria-hidden="true"><path d="M3.5 2.5l8 5-8 5V2.5z"/></svg>`,
+  pause:    `<svg class="bi" viewBox="0 0 14 14" fill="currentColor" stroke="none" aria-hidden="true"><rect x="2.5" y="2" width="3.5" height="10" rx="1"/><rect x="8" y="2" width="3.5" height="10" rx="1"/></svg>`,
+  upload:   `<svg class="bi" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 10V2M4 5l3-3 3 3"/><path d="M2 12h10"/></svg>`,
+  download: `<svg class="bi" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 2v8M4 7l3 3 3-3"/><path d="M2 12h10"/></svg>`,
+  eye:      `<svg class="bi" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 7s2.5-4.5 6-4.5S13 7 13 7s-2.5 4.5-6 4.5S1 7 1 7z"/><circle cx="7" cy="7" r="1.8"/></svg>`,
+  chart:    `<svg class="bi" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="1 10 4 6 7 8 10 4 13 7"/></svg>`,
+  check:    `<svg class="bi" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 7l4 4 6-6"/></svg>`,
+  deploy:   `<svg class="bi" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 1l1.8 4h4L9.5 8l1.5 4.5L7 10 3 12.5 4.5 8 1.2 5h4z"/></svg>`,
+  role:     `<svg class="bi" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="5" r="2.5"/><path d="M2 12c0-2.76 2.24-5 5-5s5 2.24 5 5"/></svg>`,
+  docs:     `<svg class="bi" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 2h8a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/><path d="M4 5h6M4 7h4M4 9h5"/></svg>`,
+};
+
 /* ── API helper ────────────────────────────────────────────────────────────── */
 async function api(method, path, body) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
@@ -65,10 +85,27 @@ document.getElementById('logout-btn').onclick = async () => {
   window.location.href = '/login';
 };
 
-/* ── Sidebar toggle ─────────────────────────────────────────────────────────── */
+/* ── Sidebar toggle + mobile backdrop ──────────────────────────────────────── */
+const _sidebar  = document.getElementById('sidebar');
+const _backdrop = document.getElementById('sidebar-backdrop');
+const _MOBILE_BP = 640;
+
+function _closeMobileSidebar() {
+  _sidebar.classList.add('collapsed');
+  _backdrop.classList.remove('visible');
+  document.body.style.overflow = '';
+}
+
 document.getElementById('sidebar-toggle').addEventListener('click', () => {
-  document.getElementById('sidebar').classList.toggle('collapsed');
+  _sidebar.classList.toggle('collapsed');
+  if (window.innerWidth <= _MOBILE_BP) {
+    const isOpen = !_sidebar.classList.contains('collapsed');
+    _backdrop.classList.toggle('visible', isOpen);
+    document.body.style.overflow = isOpen ? 'hidden' : '';
+  }
 });
+
+_backdrop.addEventListener('click', _closeMobileSidebar);
 
 /* ── Theme picker (light / system / dark) ───────────────────────────────────── */
 const THEME_KEY = 'fluxdb-theme';
@@ -116,6 +153,8 @@ document.querySelectorAll('.nav-btn[data-view]').forEach(btn => {
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     showView('view-' + btn.dataset.view);
+    // Close sidebar overlay on mobile after nav
+    if (window.innerWidth <= _MOBILE_BP) _closeMobileSidebar();
     if (btn.dataset.view === 'dashboard')   loadDashboard();
     if (btn.dataset.view === 'databases')   loadDatabases();
     if (btn.dataset.view === 'users')       loadUsers();
@@ -436,11 +475,11 @@ async function loadDatabases() {
         ${d.fields.map(f => `<span class="field-chip">${esc(f.name)}${f.required ? '<span style="color:var(--danger);font-size:.7rem">*</span>' : ''}<span class="badge badge-${f.type}" style="margin-left:4px">${f.type}</span></span>`).join('')}
       </div>
       <div class="db-card-actions" onclick="event.stopPropagation()">
-        <button class="btn btn-sm btn-outline" onclick="openRecords('${d.id}')">&#128202; Open</button>
-        <button class="btn btn-sm btn-outline" onclick="openShareModal('${d.id}','${esc(d.name)}')">&#128279; Share</button>
+        <button class="btn btn-sm btn-outline" onclick="openRecords('${d.id}')">${IC.open} Open</button>
+        <button class="btn btn-sm btn-outline" onclick="openShareModal('${d.id}','${esc(d.name)}')">${IC.share} Share</button>
         ${canModify ? `
-          <button class="btn btn-sm btn-outline" onclick="editDatabase('${d.id}')">&#9998; Edit</button>
-          <button class="btn btn-sm btn-danger" onclick="deleteDatabase('${d.id}','${esc(d.name)}')">&#128465; Delete</button>
+          <button class="btn btn-sm btn-outline" onclick="editDatabase('${d.id}')">${IC.edit} Edit</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteDatabase('${d.id}','${esc(d.name)}')">${IC.trash} Delete</button>
         ` : ''}
       </div>
     </div>`;
@@ -718,8 +757,8 @@ function renderRecords(records) {
       <td>${fmtDate(r.updatedAt)}</td>
       <td>
         <div class="actions-cell">
-          ${canEdit ? `<button class="btn-icon" title="Edit" onclick="editRecord('${r.id}')">&#9998;</button>` : ''}
-          ${canEdit ? `<button class="btn-icon del" title="Delete" onclick="deleteRecord('${r.id}')">&#128465;</button>` : ''}
+          ${canEdit ? `<button class="btn-icon" title="Edit" onclick="editRecord('${r.id}')">${IC.edit}</button>` : ''}
+          ${canEdit ? `<button class="btn-icon del" title="Delete" onclick="deleteRecord('${r.id}')">${IC.trash}</button>` : ''}
         </div>
       </td>
     </tr>`;
@@ -847,9 +886,9 @@ async function loadUsers() {
       <td><span class="role-tag role-${u.role}">${u.role.toUpperCase()}</span></td>
       <td>
         <div class="actions-cell">
-          <button class="btn-icon" onclick="editUser('${u.id}','${esc(u.username)}','${u.role}')">&#9998; Edit</button>
+          <button class="btn-icon" onclick="editUser('${u.id}','${esc(u.username)}','${u.role}')">${IC.edit} Edit</button>
           ${u.username!=='admin'&&u.username!=='guest'
-            ? `<button class="btn-icon del" onclick="deleteUser('${u.id}','${esc(u.username)}')">&#128465; Delete</button>`
+            ? `<button class="btn-icon del" onclick="deleteUser('${u.id}','${esc(u.username)}')">${IC.trash} Delete</button>`
             : ''}
         </div>
       </td>
@@ -1013,8 +1052,8 @@ async function loadApiKeys() {
           <td>${k.lastUsed ? fmtDate(k.lastUsed) : '<span style="color:var(--text-muted)">Never</span>'}</td>
           <td>
             <div class="actions-cell">
-              <button class="btn btn-ghost btn-xs" onclick="changeKeyRole('${k.id}','${esc(k.name)}','${role}')">&#9998; Role</button>
-              <button class="btn-icon del" onclick="revokeApiKey('${k.id}','${esc(k.name)}')">&#128465; Revoke</button>
+              <button class="btn btn-ghost btn-xs" onclick="changeKeyRole('${k.id}','${esc(k.name)}','${role}')">${IC.role} Role</button>
+              <button class="btn-icon del" onclick="revokeApiKey('${k.id}','${esc(k.name)}')">${IC.trash} Revoke</button>
             </div>
           </td>
         </tr>`;
@@ -1061,7 +1100,7 @@ document.getElementById('btn-create-key').onclick = () => {
           </p>
           <div class="key-reveal-box">
             <code id="new-key-value">${esc(result.key)}</code>
-            <button class="btn btn-sm btn-outline" onclick="copyApiKey()">&#128203; Copy</button>
+            <button class="btn btn-sm btn-outline" onclick="copyApiKey()">${IC.copy} Copy</button>
           </div>
           <p style="color:var(--text-muted);font-size:.78rem;margin-top:10px">
             Use as: <code>X-API-Key: ${esc(result.key)}</code>
@@ -1354,9 +1393,7 @@ async function renderRelList() {
             <code class="rel-field-code">${esc(r.toField)}</code></td>
         <td style="color:var(--text-muted)">${esc(r.createdBy)}</td>
         <td><div class="actions-cell">
-          <button class="btn-icon del" onclick="deleteRelationship('${r.id}','${esc(r.name)}')">
-            &#128465; Delete
-          </button>
+          <button class="btn-icon del" onclick="deleteRelationship('${r.id}','${esc(r.name)}')">${IC.trash} Delete</button>
         </div></td>
       </tr>`).join('')}</tbody>
     </table>`;
@@ -1661,7 +1698,7 @@ function renderJoinResults(res) {
         ${res.rowCount} row${res.rowCount!==1?'s':''} from <strong>${esc(res.sourceDb)}</strong>
         ${res.truncated ? `(showing ${res.rows.length})` : ''}
       </span>
-      <button class="btn btn-xs btn-outline" onclick="exportJoinCSV()">&#8595; Export CSV</button>
+      <button class="btn btn-xs btn-outline" onclick="exportJoinCSV()">${IC.download} Export CSV</button>
     </div>
     <div class="table-wrap">
       <table>
@@ -1921,12 +1958,12 @@ function renderApiCard(api) {
       <code class="endpoint-path">${esc(ep.path)}</code>
       <span class="endpoint-desc">${esc(ep.desc)}</span>
       <div class="endpoint-actions">
-        <button class="btn btn-sm btn-ghost" onclick="copyText(${JSON.stringify(ep.path.replace('/:id',''))})" title="Copy base URL">&#128203;</button>
+        <button class="btn btn-sm btn-ghost" onclick="copyText(${JSON.stringify(ep.path.replace('/:id',''))})" title="Copy base URL">${IC.copy}</button>
         <button class="btn btn-sm btn-ghost" onclick="toggleCurl('curl-${api.slug}-${i}')" title="Show curl example">&lt;/&gt;</button>
       </div>
     </div>
     <div class="curl-block hidden" id="curl-${api.slug}-${i}">
-      <button class="curl-copy-btn" onclick="copyText(${JSON.stringify(ep.curl)})" title="Copy">&#128203;</button>
+      <button class="curl-copy-btn" onclick="copyText(${JSON.stringify(ep.curl)})" title="Copy">${IC.copy}</button>
       <pre>${esc(ep.curl)}</pre>
     </div>`).join('');
 
@@ -1942,13 +1979,13 @@ function renderApiCard(api) {
           <div class="api-card-slug">
             <span class="api-slug-label">Base URL</span>
             <code class="api-base-url">${esc(baseUrl)}</code>
-            <button class="btn btn-sm btn-ghost" onclick="copyText(${JSON.stringify(baseUrl)})" title="Copy base URL">&#128203;</button>
+            <button class="btn btn-sm btn-ghost" onclick="copyText(${JSON.stringify(baseUrl)})" title="Copy base URL">${IC.copy}</button>
           </div>
         </div>
         <div class="api-card-meta" style="display:flex;align-items:center;gap:8px;">
           <span class="record-count-badge">${api.recordCount} record${api.recordCount !== 1 ? 's' : ''}</span>
           <span class="record-count-badge">${api.fields.length} field${api.fields.length !== 1 ? 's' : ''}</span>
-          <button class="btn btn-sm btn-primary" onclick="openApiDocs(${JSON.stringify(api)})" style="margin-left:4px;">&#128196; Docs</button>
+          <button class="btn btn-sm btn-primary" onclick="openApiDocs(${JSON.stringify(api)})" style="margin-left:4px;">${IC.docs} Docs</button>
         </div>
       </div>
       <div class="api-field-chips">${fieldChips}</div>
@@ -2167,7 +2204,7 @@ function renderWebhookCard(h) {
         </div>
         <div class="wh-url-row">
           <code class="wh-url">${esc(h.url)}</code>
-          <button class="btn btn-sm btn-ghost" onclick="copyText(${JSON.stringify(h.url)})" title="Copy URL">&#128203;</button>
+          <button class="btn btn-sm btn-ghost" onclick="copyText(${JSON.stringify(h.url)})" title="Copy URL">${IC.copy}</button>
         </div>
         <div class="wh-meta-row">
           <span class="wh-last-delivery">${lastStatus}</span>
@@ -2176,10 +2213,10 @@ function renderWebhookCard(h) {
         </div>
       </div>
       <div class="wh-card-actions">
-        <button class="btn btn-sm btn-outline" onclick="testWebhook('${h.id}')" title="Send test payload">&#9654; Test</button>
-        <button class="btn btn-sm btn-outline" onclick="viewDeliveries('${h.id}','${esc(h.event)}')" title="Delivery log">&#128200; Log</button>
-        <button class="btn btn-sm btn-outline" onclick="toggleWebhook('${h.id}',${h.active})">${h.active ? '&#9646;&#9646; Pause' : '&#9654; Resume'}</button>
-        <button class="btn btn-sm btn-danger"  onclick="deleteWebhook('${h.id}','${esc(h.event)}')">&#128465;</button>
+        <button class="btn btn-sm btn-outline" onclick="testWebhook('${h.id}')" title="Send test payload">${IC.play} Test</button>
+        <button class="btn btn-sm btn-outline" onclick="viewDeliveries('${h.id}','${esc(h.event)}')" title="Delivery log">${IC.chart} Log</button>
+        <button class="btn btn-sm btn-outline" onclick="toggleWebhook('${h.id}',${h.active})">${h.active ? IC.pause + ' Pause' : IC.play + ' Resume'}</button>
+        <button class="btn btn-sm btn-danger"  onclick="deleteWebhook('${h.id}','${esc(h.event)}')">${IC.trash}</button>
       </div>
     </div>`;
 }
@@ -2478,8 +2515,8 @@ function showImportStep2() {
   footer.className = 'modal-footer';
   footer.innerHTML = `
     <button class="btn btn-outline" id="modal-cancel">Cancel</button>
-    <button class="btn btn-ghost" id="import-back-btn">&#8592; Back</button>
-    <button class="btn btn-primary" id="import-submit-btn">&#8679; Import ${rows.length} Rows</button>`;
+    <button class="btn btn-ghost" id="import-back-btn"><svg class="bi" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2.5L4 7l5 4.5"/></svg> Back</button>
+    <button class="btn btn-primary" id="import-submit-btn">${IC.upload} Import ${rows.length} Rows</button>`;
   document.getElementById('modal-box').appendChild(footer);
 
   document.getElementById('modal-cancel').onclick = closeModal;
@@ -2571,13 +2608,13 @@ function renderCredentialCard(c) {
         ${c.description ? `<p class="cred-desc">${esc(c.description)}</p>` : ''}
         <div class="cred-value-row">
           <span class="cred-mask" id="cval-${c.id}">••••••••••••</span>
-          <button class="btn btn-ghost btn-sm cred-reveal-btn" onclick="revealCredential('${c.id}')">&#128065; Reveal</button>
-          <button class="btn btn-ghost btn-sm cred-copy-btn hidden" id="ccopy-${c.id}" onclick="copyCredential('${c.id}')">&#128203; Copy</button>
+          <button class="btn btn-ghost btn-sm cred-reveal-btn" onclick="revealCredential('${c.id}')">${IC.eye} Reveal</button>
+          <button class="btn btn-ghost btn-sm cred-copy-btn hidden" id="ccopy-${c.id}" onclick="copyCredential('${c.id}')">${IC.copy} Copy</button>
         </div>
       </div>
       <div class="cred-actions">
-        <button class="btn btn-outline btn-sm" onclick="editCredential('${c.id}', '${esc(c.name)}', '${esc(c.description || '')}')">&#9998; Edit</button>
-        <button class="btn btn-danger btn-sm" onclick="deleteCredential('${c.id}', '${esc(c.name)}')">&#128465; Delete</button>
+        <button class="btn btn-outline btn-sm" onclick="editCredential('${c.id}', '${esc(c.name)}', '${esc(c.description || '')}')">${IC.edit} Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteCredential('${c.id}', '${esc(c.name)}')">${IC.trash} Delete</button>
       </div>
     </div>`;
 }
@@ -2607,7 +2644,7 @@ function copyCredential(id) {
   if (!value) return;
   navigator.clipboard.writeText(value).then(() => {
     const orig = btn.innerHTML;
-    btn.innerHTML = '&#10003; Copied';
+    btn.innerHTML = IC.check + ' Copied';
     setTimeout(() => { btn.innerHTML = orig; }, 1500);
   }).catch(() => toast('Clipboard access denied', 'error'));
 }
@@ -2739,9 +2776,9 @@ function renderBackupList(files) {
       <td class="bk-size">${fmtBytes(f.size)}</td>
       <td class="bk-date">${new Date(f.createdAt).toLocaleString()}</td>
       <td class="bk-actions">
-        <button class="btn btn-outline btn-xs" onclick="downloadBackup('${esc(f.filename)}')">&#8659; Download</button>
-        <button class="btn btn-primary btn-xs" onclick="confirmRestore('${esc(f.filename)}')">&#8635; Restore</button>
-        <button class="btn btn-danger btn-xs" onclick="confirmDeleteBackup('${esc(f.filename)}')">&#128465;</button>
+        <button class="btn btn-outline btn-xs" onclick="downloadBackup('${esc(f.filename)}')">${IC.download} Download</button>
+        <button class="btn btn-primary btn-xs" onclick="confirmRestore('${esc(f.filename)}')">${IC.refresh} Restore</button>
+        <button class="btn btn-danger btn-xs" onclick="confirmDeleteBackup('${esc(f.filename)}')">${IC.trash}</button>
       </td>
     </tr>`).join('');
 
@@ -2773,7 +2810,7 @@ async function createBackup() {
     toast(err.message, 'error');
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '&#8659; Create Backup';
+    btn.innerHTML = IC.download + ' Create Backup';
   }
 }
 
@@ -3294,7 +3331,8 @@ function toggleApiKeyVis() {
 function tryPrefillApiKey() {
   // If the user already typed a key in a previous session this page load, reuse it
   const saved = sessionStorage.getItem('apidoc_key');
-  if (saved) document.getElementById('apidoc-apikey').value = saved;
+  const inp   = document.getElementById('apidoc-apikey');
+  if (saved && inp) inp.value = saved;
 }
 
 function buildExampleBody(fields) {
@@ -3862,7 +3900,7 @@ function sbTableHtml(tbl) {
       <label class="sb-req" title="Required" onmousedown="event.stopPropagation()">
         <input type="checkbox" ${f.required ? 'checked' : ''} onchange="sbUpdateFieldReq('${tbl.id}','${f.id}',this.checked)">R
       </label>
-      <button class="sb-xbtn" onclick="sbDeleteField('${tbl.id}','${f.id}',event)" title="Remove">&#10005;</button>
+      <button class="sb-xbtn" onclick="sbDeleteField('${tbl.id}','${f.id}',event)" title="Remove"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M2 2l6 6M8 2L2 8"/></svg></button>
     </div>`).join('');
 
   return `
@@ -3870,7 +3908,7 @@ function sbTableHtml(tbl) {
       <input class="sb-tname" id="sbt-name-${tbl.id}" value="${esc(tbl.name)}"
              oninput="sbUpdateTableName('${tbl.id}',this.value)" onmousedown="event.stopPropagation()">
       ${tbl.dbId ? '<span class="sb-exists-tag">existing</span>' : ''}
-      <button class="sb-xbtn sb-xbtn-tbl" onclick="sbDeleteTable('${tbl.id}',event)" title="Delete table">&#10005;</button>
+      <button class="sb-xbtn sb-xbtn-tbl" onclick="sbDeleteTable('${tbl.id}',event)" title="Delete table"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M2 2l6 6M8 2L2 8"/></svg></button>
     </div>
     <div class="sb-tbody">${fields}</div>
     <div class="sb-tfoot">
@@ -4178,8 +4216,8 @@ function renderTplCard(t) {
     `<span style="background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);color:#a5b4fc;padding:2px 8px;border-radius:10px;font-size:.72rem;">${esc(d.name)}</span>`
   ).join('');
   const adminBtns = isAdmin ? `
-    <button class="btn btn-sm btn-outline" onclick="openEditTplModal(${JSON.stringify(t.id)})">&#9998; Edit</button>
-    <button class="btn btn-sm btn-danger"  onclick="deleteTpl(${JSON.stringify(t.id)}, ${JSON.stringify(t.name)})">&#128465;</button>` : '';
+    <button class="btn btn-sm btn-outline" onclick="openEditTplModal(${JSON.stringify(t.id)})">${IC.edit} Edit</button>
+    <button class="btn btn-sm btn-danger"  onclick="deleteTpl(${JSON.stringify(t.id)}, ${JSON.stringify(t.name)})">${IC.trash}</button>` : '';
   return `
     <div class="db-card" style="display:flex;flex-direction:column;gap:10px;">
       <div style="display:flex;align-items:flex-start;gap:12px;">
@@ -4199,7 +4237,7 @@ function renderTplCard(t) {
         &bull; by ${esc(t.createdBy)}
       </div>
       <div class="db-card-actions" style="margin-top:auto;" onclick="event.stopPropagation()">
-        <button class="btn btn-sm btn-primary" onclick="openInstantiateModal(${JSON.stringify(t)})">&#9889; Instantiate</button>
+        <button class="btn btn-sm btn-primary" onclick="openInstantiateModal(${JSON.stringify(t)})">${IC.deploy} Instantiate</button>
         ${adminBtns}
       </div>
     </div>`;
