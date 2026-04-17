@@ -305,6 +305,9 @@ nav {
   overflow-y: auto;
   overflow-x: hidden;
   min-height: 0;           /* lets flexbox shrink it so footer is never pushed out */
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
 
 /* Thin custom scrollbar inside nav */
