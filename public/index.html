@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FluxDB</title>
   <link rel="stylesheet" href="/fonts/inter.css" />
-  <link rel="stylesheet" href="/style.css?v=27" />
+  <link rel="stylesheet" href="/style.css?v=28" />
 </head>
 <body>
   <!-- ── App Shell ── -->
@@ -468,11 +468,30 @@
             </button>
           </div>
         </div>
+
+        <!-- Backup Schedule Config -->
+        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:20px;">
+          <h3 style="font-size:.95rem;margin:0 0 12px 0;color:var(--text);">Automatic Backups</h3>
+          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+            <label style="display:flex;align-items:center;gap:8px;font-size:.85rem;">
+              <span>Schedule:</span>
+              <select id="backup-schedule-select" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:.85rem;font-family:inherit;">
+                <option value="disabled">Disabled</option>
+                <option value="6">Every 6 hours</option>
+                <option value="12">Every 12 hours</option>
+                <option value="24" selected>Every 24 hours</option>
+                <option value="48">Every 48 hours</option>
+              </select>
+            </label>
+            <button id="btn-save-schedule" class="btn btn-sm btn-outline">Save Schedule</button>
+            <span id="schedule-status" style="font-size:.8rem;color:var(--text-muted);"></span>
+          </div>
+        </div>
+
         <p class="apikey-hint">
           Backups are written to the <code>backup/</code> folder on the server. A <strong>full snapshot</strong>
           captures all databases, records, users, API keys, webhooks and credentials. Individual
           <strong>per-database files</strong> let you restore a single table without affecting the rest.
-          Backups are also created <strong>automatically every 24 hours</strong>.
         </p>
         <div id="backup-list"></div>
       </div>
@@ -706,6 +725,6 @@
     </div>
   </div>
 
-  <script src="/app.js?v=24"></script>
+  <script src="/app.js?v=25"></script>
 </body>
 </html>

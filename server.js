@@ -51,6 +51,7 @@ db.defaults({
   relationships: [], // { id, name, fromDb, fromField, toDb, toField, type, createdBy, createdAt }
   shareLinks:  [],   // { id, token, databaseId, permission, label, createdBy, createdAt, expiresAt, accessCount }
   dbTemplates: [],   // { id, name, description, category, icon, databases:[{name,fields}], relationships:[{fromDb,fromField,toDb,toField,type}], createdBy, createdAt }
+  backupSchedule: 24, // hours between auto-backups; 0 = disabled
 }).write();
 
 // ─── Activity log helper ──────────────────────────────────────────────────────
@@ -1779,6 +1780,27 @@ app.get('/api/backups', requireAdmin, (req, res) => {
 });
 
 // GET /api/backup/:filename  — download a specific backup file (admin only)
+// GET /api/backup/schedule — retrieve current backup schedule (must come before :filename wildcard)
+app.get('/api/backup/schedule', requireAdmin, (req, res) => {
+  const hours = db.get('backupSchedule').value() || 24;
+  res.json({ hours, enabled: hours > 0 });
+});
+
+// PUT /api/backup/schedule — update backup schedule
+app.put('/api/backup/schedule', requireAdmin, (req, res) => {
+  const { hours } = req.body;
+  if (hours === undefined || hours < 0 || hours > 168) {
+    return res.status(400).json({ error: 'hours must be 0–168 (0=disabled)' });
+  }
+  db.set('backupSchedule', hours).write();
+  startAutoBackup();
+  const user = getAuthUser(req);
+  logActivity('config_backup', user.username, 'schedule',
+    hours === 0 ? 'Disabled auto-backup' : `Set to every ${hours} hours`);
+  res.json({ hours, enabled: hours > 0 });
+});
+
+// GET /api/backup/:filename  — download a specific backup file (admin only)
 app.get('/api/backup/:filename', requireAdmin, (req, res) => {
   const safe = path.basename(req.params.filename);
   if (!safe.endsWith('.json')) return res.status(400).json({ error: 'Invalid filename' });
@@ -1856,17 +1878,31 @@ app.post('/api/restore', requireAdmin, (req, res) => {
   res.status(400).json({ error: 'Unrecognised backup format' });
 });
 
-// ─── Scheduled auto-backup (every 24 hours) ───────────────────────────────────
-setInterval(() => {
-  try {
-    const tag   = dateTag();
-    const files = writeBackup(tag);
-    console.log(`[AutoBackup] ${new Date().toISOString()} — ${files.length} file(s) written`);
-    logActivity('backup_auto', 'system', 'backup', `${files.length} file(s)`);
-  } catch (err) {
-    console.error('[AutoBackup] Error:', err.message);
+// ─── Scheduled auto-backup (configurable interval) ─────────────────────────────
+let _backupInterval = null;
+
+function startAutoBackup() {
+  if (_backupInterval) clearInterval(_backupInterval);
+  const hours = db.get('backupSchedule').value() || 24;
+  if (hours <= 0) {
+    console.log('[AutoBackup] Disabled');
+    return;
   }
-}, 24 * 60 * 60 * 1000).unref();
+  const ms = hours * 60 * 60 * 1000;
+  console.log(`[AutoBackup] Scheduled every ${hours} hours`);
+  _backupInterval = setInterval(() => {
+    try {
+      const tag   = dateTag();
+      const files = writeBackup(tag);
+      console.log(`[AutoBackup] ${new Date().toISOString()} — ${files.length} file(s) written`);
+      logActivity('backup_auto', 'system', 'backup', `${files.length} file(s)`);
+    } catch (err) {
+      console.error('[AutoBackup] Error:', err.message);
+    }
+  }, ms).unref();
+}
+
+startAutoBackup();
 
 // ─── Serve SPA ────────────────────────────────────────────────────────────────
 app.get('/login', (req, res) => {

@@ -2758,6 +2758,53 @@ async function loadBackups() {
   } catch (err) {
     listEl.innerHTML = `<p class="empty-state" style="color:var(--danger)">${esc(err.message)}</p>`;
   }
+  // Also load and display the schedule
+  await loadBackupSchedule();
+}
+
+async function loadBackupSchedule() {
+  try {
+    const { hours, enabled } = await api('GET', '/backup/schedule');
+    const selectEl = document.getElementById('backup-schedule-select');
+    const statusEl = document.getElementById('schedule-status');
+    if (selectEl) {
+      selectEl.value = hours === 0 ? 'disabled' : String(hours);
+      if (statusEl) {
+        if (hours === 0) {
+          statusEl.textContent = '(Auto-backups disabled)';
+        } else {
+          statusEl.textContent = `(Next backup in ~${hours}h)`;
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load backup schedule:', err.message);
+  }
+}
+
+async function saveBackupSchedule() {
+  const selectEl = document.getElementById('backup-schedule-select');
+  const statusEl = document.getElementById('schedule-status');
+  const btn = document.getElementById('btn-save-schedule');
+  if (!selectEl || !btn) return;
+
+  btn.disabled = true;
+  const oldText = btn.textContent;
+  btn.textContent = 'Saving…';
+  try {
+    const value = selectEl.value;
+    const hours = value === 'disabled' ? 0 : parseInt(value);
+    await api('PUT', '/backup/schedule', { hours });
+    toast('Backup schedule updated', 'success');
+    if (statusEl) {
+      statusEl.textContent = hours === 0 ? '(Auto-backups disabled)' : `(Every ${hours} hours)`;
+    }
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = oldText;
+  }
 }
 
 function renderBackupList(files) {
@@ -2855,6 +2902,7 @@ function confirmDeleteBackup(filename) {
 
 document.getElementById('btn-create-backup').onclick  = createBackup;
 document.getElementById('btn-refresh-backups').onclick = loadBackups;
+document.getElementById('btn-save-schedule').onclick   = saveBackupSchedule;
 
 // ─── Share Links ─────────────────────────────────────────────────────────────
 
