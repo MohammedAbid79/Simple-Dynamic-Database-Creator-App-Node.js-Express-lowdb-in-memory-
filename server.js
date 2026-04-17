@@ -51,7 +51,8 @@ db.defaults({
   relationships: [], // { id, name, fromDb, fromField, toDb, toField, type, createdBy, createdAt }
   shareLinks:  [],   // { id, token, databaseId, permission, label, createdBy, createdAt, expiresAt, accessCount }
   dbTemplates: [],   // { id, name, description, category, icon, databases:[{name,fields}], relationships:[{fromDb,fromField,toDb,toField,type}], createdBy, createdAt }
-  backupSchedule: 24, // hours between auto-backups; 0 = disabled
+  backupSchedule:        24, // hours between auto-backups; 0 = disabled
+  backupRetentionCount:   5, // number of full_*.json snapshots to keep (N-1 rotation)
 }).write();
 
 // ─── Activity log helper ──────────────────────────────────────────────────────
@@ -1748,6 +1749,26 @@ function writeBackup(tag) {
   return written;
 }
 
+// Prune full_*.json snapshots — keep only the N newest (N-1 rotation).
+function pruneFullBackups() {
+  const n = db.get('backupRetentionCount').value() || 5;
+  if (n <= 0) return; // 0 means unlimited
+  try {
+    const fulls = fs.readdirSync(BACKUP_DIR)
+      .filter(f => f.startsWith('full_') && f.endsWith('.json'))
+      .map(f => ({ f, mt: fs.statSync(path.join(BACKUP_DIR, f)).mtimeMs }))
+      .sort((a, b) => b.mt - a.mt); // newest first
+
+    const toDelete = fulls.slice(n); // everything beyond retention window
+    for (const { f } of toDelete) {
+      fs.unlinkSync(path.join(BACKUP_DIR, f));
+      console.log(`[Retention] Pruned old backup: ${f}`);
+    }
+  } catch (err) {
+    console.error('[Retention] Prune error:', err.message);
+  }
+}
+
 // ─── Backup routes ────────────────────────────────────────────────────────────
 
 // POST /api/backup  — create a backup now (admin only)
@@ -1756,6 +1777,7 @@ app.post('/api/backup', requireAdmin, (req, res) => {
   try {
     const tag   = dateTag();
     const files = writeBackup(tag);
+    pruneFullBackups();
     logActivity('backup_created', user.username, 'backup', `${files.length} file(s) written`);
     res.json({ message: 'Backup created', files });
   } catch (err) {
@@ -1766,17 +1788,45 @@ app.post('/api/backup', requireAdmin, (req, res) => {
 // GET /api/backups  — list all backup files (admin only)
 app.get('/api/backups', requireAdmin, (req, res) => {
   try {
-    const files = fs.readdirSync(BACKUP_DIR)
+    const all = fs.readdirSync(BACKUP_DIR)
       .filter(f => f.endsWith('.json'))
       .map(f => {
         const stat = fs.statSync(path.join(BACKUP_DIR, f));
         return { filename: f, size: stat.size, createdAt: stat.mtime.toISOString() };
       })
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    res.json(files);
+
+    // Assign priority rank to full snapshots (P1 = newest / best-safe)
+    let pRank = 1;
+    for (const f of all) {
+      if (f.filename.startsWith('full_')) {
+        f.priority = pRank++;
+      }
+    }
+
+    res.json(all);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// GET /api/backup/retention — retrieve current retention count (must come before :filename wildcard)
+app.get('/api/backup/retention', requireAdmin, (req, res) => {
+  const count = db.get('backupRetentionCount').value() || 5;
+  res.json({ count });
+});
+
+// PUT /api/backup/retention — update retention count
+app.put('/api/backup/retention', requireAdmin, (req, res) => {
+  const { count } = req.body;
+  if (count === undefined || count < 1 || count > 50) {
+    return res.status(400).json({ error: 'count must be 1–50' });
+  }
+  db.set('backupRetentionCount', count).write();
+  pruneFullBackups(); // apply immediately
+  const user = getAuthUser(req);
+  logActivity('config_backup', user.username, 'retention', `Set to keep ${count} full snapshots`);
+  res.json({ count });
 });
 
 // GET /api/backup/:filename  — download a specific backup file (admin only)
@@ -1894,6 +1944,7 @@ function startAutoBackup() {
     try {
       const tag   = dateTag();
       const files = writeBackup(tag);
+      pruneFullBackups();
       console.log(`[AutoBackup] ${new Date().toISOString()} — ${files.length} file(s) written`);
       logActivity('backup_auto', 'system', 'backup', `${files.length} file(s)`);
     } catch (err) {

@@ -2758,8 +2758,8 @@ async function loadBackups() {
   } catch (err) {
     listEl.innerHTML = `<p class="empty-state" style="color:var(--danger)">${esc(err.message)}</p>`;
   }
-  // Also load and display the schedule
   await loadBackupSchedule();
+  await loadBackupRetention();
 }
 
 async function loadBackupSchedule() {
@@ -2779,6 +2779,44 @@ async function loadBackupSchedule() {
     }
   } catch (err) {
     console.error('Failed to load backup schedule:', err.message);
+  }
+}
+
+async function loadBackupRetention() {
+  try {
+    const { count } = await api('GET', '/backup/retention');
+    const inp = document.getElementById('backup-retention-input');
+    if (inp) inp.value = count;
+  } catch (err) {
+    console.error('Failed to load backup retention:', err.message);
+  }
+}
+
+async function saveBackupRetention() {
+  const inp    = document.getElementById('backup-retention-input');
+  const status = document.getElementById('retention-status');
+  const btn    = document.getElementById('btn-save-retention');
+  if (!inp || !btn) return;
+
+  const count = parseInt(inp.value, 10);
+  if (!count || count < 1 || count > 50) {
+    toast('Retention count must be 1–50', 'error');
+    return;
+  }
+
+  btn.disabled = true;
+  const oldText = btn.textContent;
+  btn.textContent = 'Saving…';
+  try {
+    await api('PUT', '/backup/retention', { count });
+    toast(`Keeping last ${count} full snapshot(s)`, 'success');
+    if (status) status.textContent = `(Keeping last ${count})`;
+    loadBackups(); // refresh list so pruned files disappear
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = oldText;
   }
 }
 
@@ -2814,10 +2852,14 @@ function renderBackupList(files) {
     return;
   }
 
-  const rows = files.map(f => `
+  const rows = files.map(f => {
+    const priorityBadge = f.priority != null
+      ? `<span class="bk-priority${f.priority === 1 ? ' bk-priority-best' : ''}" title="${f.priority === 1 ? 'Best-safe version for crash recovery' : `Priority ${f.priority}`}">P${f.priority}</span>`
+      : '';
+    return `
     <tr>
       <td class="bk-name">
-        ${backupTypeLabel(f.filename)}
+        ${backupTypeLabel(f.filename)}${priorityBadge}
         <span class="bk-filename">${esc(f.filename)}</span>
       </td>
       <td class="bk-size">${fmtBytes(f.size)}</td>
@@ -2827,7 +2869,8 @@ function renderBackupList(files) {
         <button class="btn btn-primary btn-xs" onclick="confirmRestore('${esc(f.filename)}')">${IC.refresh} Restore</button>
         <button class="btn btn-danger btn-xs" onclick="confirmDeleteBackup('${esc(f.filename)}')">${IC.trash}</button>
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 
   listEl.innerHTML = `
     <div class="table-wrap">
@@ -2903,6 +2946,7 @@ function confirmDeleteBackup(filename) {
 document.getElementById('btn-create-backup').onclick  = createBackup;
 document.getElementById('btn-refresh-backups').onclick = loadBackups;
 document.getElementById('btn-save-schedule').onclick   = saveBackupSchedule;
+document.getElementById('btn-save-retention').onclick  = saveBackupRetention;
 
 // ─── Share Links ─────────────────────────────────────────────────────────────
 
