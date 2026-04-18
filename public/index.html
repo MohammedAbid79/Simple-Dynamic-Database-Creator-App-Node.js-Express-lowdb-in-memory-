@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FluxDB</title>
   <link rel="stylesheet" href="/fonts/inter.css" />
-  <link rel="stylesheet" href="/style.css?v=29" />
+  <link rel="stylesheet" href="/style.css?v=30" />
 </head>
 <body>
   <!-- ── App Shell ── -->
@@ -179,27 +179,20 @@
           <div id="user-badge" class="user-info"></div>
         </div>
 
-        <!-- 3-way theme picker -->
-        <div class="theme-picker" role="group" aria-label="Color theme">
-          <button class="theme-picker-btn" data-theme-pick="light" data-tip="Light" aria-label="Light theme">
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <circle cx="10" cy="10" r="3.5"/>
-              <path d="M10 2v2M10 16v2M2 10h2M16 10h2M4.22 4.22l1.42 1.42M14.36 14.36l1.42 1.42M4.22 15.78l1.42-1.42M14.36 5.64l1.42-1.42"/>
-            </svg>
-          </button>
-          <button class="theme-picker-btn" data-theme-pick="system" data-tip="System" aria-label="Follow system theme">
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <rect x="2" y="3.5" width="16" height="10" rx="1.5"/>
-              <path d="M6.5 17h7M10 13.5V17"/>
-            </svg>
-          </button>
-          <button class="theme-picker-btn" data-theme-pick="dark" data-tip="Dark" aria-label="Dark theme">
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M17.5 12.5A7.5 7.5 0 0 1 8 3a7.5 7.5 0 1 0 9.5 9.5z"/>
-            </svg>
-          </button>
+        <!-- Dark / light toggle switch -->
+        <div class="theme-switch-wrap" title="Toggle light/dark theme">
+          <svg class="theme-sw-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="8" cy="8" r="3"/>
+            <path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3.05 3.05l1.06 1.06M11.89 11.89l1.06 1.06M3.05 12.95l1.06-1.06M11.89 4.11l1.06-1.06"/>
+          </svg>
+          <label class="theme-switch" aria-label="Toggle dark/light theme">
+            <input type="checkbox" id="theme-switch-input">
+            <span class="theme-switch-track"><span class="theme-switch-thumb"></span></span>
+          </label>
+          <svg class="theme-sw-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M13.5 9A6 6 0 0 1 7 2.5a6 6 0 1 0 6.5 6.5z"/>
+          </svg>
         </div>
-        <p class="theme-picker-current" id="theme-picker-current">System</p>
 
         <button id="logout-btn" class="btn btn-outline btn-sm logout-btn-inner">
           <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -739,6 +732,6 @@
     </div>
   </div>
 
-  <script src="/app.js?v=25"></script>
+  <script src="/app.js?v=26"></script>
 </body>
 </html>

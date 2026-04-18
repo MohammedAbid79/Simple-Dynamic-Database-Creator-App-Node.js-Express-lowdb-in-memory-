@@ -67,90 +67,58 @@
   --shadow-lg: 0 12px 40px rgba(0,0,0,.15);
 }
 
-/* ── Theme picker (3-way segmented control) ───────────────────────────────── */
-.theme-picker {
-  display: flex;
-  align-items: center;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  padding: 4px;
-  gap: 3px;
-  width: 100%;
-}
-
-.theme-picker-btn {
+/* ── Theme toggle switch (dark / light) ───────────────────────────────────── */
+.theme-switch-wrap {
   display: flex;
   align-items: center;
   justify-content: center;
-  flex: 1;
-  height: 34px;
-  border-radius: 6px;
-  background: none;
-  border: none;
+  gap: 8px;
+}
+#sidebar.collapsed .theme-sw-icon { display: none; }
+
+.theme-sw-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
   color: var(--text-muted);
+}
+
+.theme-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
   cursor: pointer;
-  transition:
-    color var(--t) var(--ease),
-    background var(--t) var(--ease),
-    box-shadow var(--t) var(--ease);
+}
+.theme-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+
+.theme-switch-track {
+  display: block;
+  width: 38px;
+  height: 22px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  transition: background var(--t) var(--ease), border-color var(--t) var(--ease);
   position: relative;
 }
-.theme-picker-btn:hover:not(.active) {
-  color: var(--text);
-  background: var(--surface3);
+.theme-switch input:checked + .theme-switch-track {
+  background: var(--accent-dim);
+  border-color: var(--accent);
 }
-.theme-picker-btn.active {
-  background: var(--surface);
-  color: var(--accent);
-  box-shadow: 0 1px 4px rgba(0,0,0,.2), 0 0 0 1px var(--border-h);
-}
-.theme-picker-btn svg {
+
+.theme-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
   width: 16px;
   height: 16px;
-  flex-shrink: 0;
-  pointer-events: none;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: transform var(--t) var(--ease), background var(--t) var(--ease);
 }
-
-/* Small "current theme" label shown below the picker */
-.theme-picker-current {
-  font-size: .68rem;
-  font-weight: 600;
-  color: var(--text-muted);
-  text-align: center;
-  letter-spacing: .03em;
-  text-transform: uppercase;
-  margin-top: -4px;
-  line-height: 1;
-}
-#sidebar.collapsed .theme-picker-current { display: none; }
-
-/* Tooltip on hover */
-.theme-picker-btn::after {
-  content: attr(data-tip);
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--surface3);
-  color: var(--text);
-  font-size: .68rem;
-  font-weight: 600;
-  letter-spacing: .02em;
-  padding: 3px 8px;
-  border-radius: 5px;
-  border: 1px solid var(--border-h);
-  white-space: nowrap;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity .12s var(--ease);
-  z-index: 100;
-}
-.theme-picker-btn:hover::after { opacity: 1; }
-
-/* Light mode tweak */
-[data-theme="light"] .theme-picker-btn.active {
-  box-shadow: 0 1px 4px rgba(0,0,0,.1), 0 0 0 1px var(--border);
+.theme-switch input:checked + .theme-switch-track .theme-switch-thumb {
+  transform: translateX(16px);
+  background: var(--accent-h);
 }
 
 @font-face {
@@ -2858,7 +2826,7 @@ body, #sidebar, #main-content,
 .modal-box, .modal-overlay,
 .nav-btn, .btn,
 .sidebar-header, .sidebar-footer, .user-profile,
-.theme-picker, .theme-picker-btn,
+.theme-switch-track, .theme-switch-thumb,
 input, select, textarea,
 table, thead th, tbody td, tr,
 .field-chip, .record-count-badge, .role-tag, .badge {
@@ -3062,8 +3030,6 @@ table, thead th, tbody td, tr,
   /* Modal: prevent overflow */
   .modal { max-height: 85vh; max-width: 100vw; margin: 0 auto; }
 
-  /* Theme picker in sidebar: smaller on mobile expanded overlay */
-  #sidebar:not(.collapsed) .theme-picker { gap: 2px; }
 }
 
 /* ── Responsive: very small (≤ 400px) ────────────────────────────────────── */

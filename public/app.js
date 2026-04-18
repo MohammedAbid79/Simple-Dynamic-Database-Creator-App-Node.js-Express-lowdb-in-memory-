@@ -107,45 +107,25 @@ document.getElementById('sidebar-toggle').addEventListener('click', () => {
 
 _backdrop.addEventListener('click', _closeMobileSidebar);
 
-/* ── Theme picker (light / system / dark) ───────────────────────────────────── */
-const THEME_KEY = 'fluxdb-theme';
-let _sysMQ = null;
-const _pickerBtns = document.querySelectorAll('.theme-picker-btn');
-const _pickerLabel = document.getElementById('theme-picker-current');
-
-function _applyEffectiveTheme(isLight) {
-  document.documentElement.dataset.theme = isLight ? 'light' : 'dark';
-  if (_pickerLabel) _pickerLabel.textContent = isLight ? 'Light' : 'Dark';
-}
+/* ── Theme toggle switch (dark / light) ──────────────────────────────────────── */
+const THEME_KEY    = 'fluxdb-theme';
+const _themeSwitch = document.getElementById('theme-switch-input');
 
 function applyThemePref(pref) {
-  if (_sysMQ) {
-    _sysMQ.removeEventListener('change', _onSysChange);
-    _sysMQ = null;
-  }
-  if (pref === 'system') {
-    _sysMQ = window.matchMedia('(prefers-color-scheme: light)');
-    _applyEffectiveTheme(_sysMQ.matches);
-    if (_pickerLabel) _pickerLabel.textContent = 'System';
-    _sysMQ.addEventListener('change', _onSysChange);
-  } else {
-    document.documentElement.dataset.theme = pref;
-    if (_pickerLabel) _pickerLabel.textContent = pref === 'light' ? 'Light' : 'Dark';
-  }
-  _pickerBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.themePick === pref));
+  const isLight = pref === 'light';
+  document.documentElement.dataset.theme = isLight ? 'light' : 'dark';
+  if (_themeSwitch) _themeSwitch.checked = isLight;
 }
 
-function _onSysChange(e) {
-  _applyEffectiveTheme(e.matches);
+applyThemePref(localStorage.getItem(THEME_KEY) || 'dark');
+
+if (_themeSwitch) {
+  _themeSwitch.addEventListener('change', () => {
+    const pref = _themeSwitch.checked ? 'light' : 'dark';
+    localStorage.setItem(THEME_KEY, pref);
+    applyThemePref(pref);
+  });
 }
-
-applyThemePref(localStorage.getItem(THEME_KEY) || 'system');
-
-_pickerBtns.forEach(btn => btn.addEventListener('click', () => {
-  const pref = btn.dataset.themePick;
-  localStorage.setItem(THEME_KEY, pref);
-  applyThemePref(pref);
-}));
 
 /* ── Navigation ────────────────────────────────────────────────────────────── */
 document.querySelectorAll('.nav-btn[data-view]').forEach(btn => {
