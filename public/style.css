@@ -1191,14 +1191,16 @@ select option { background: var(--surface2); }
 
 .query-editor {
   width: 100%;
-  height: 155px;
+  height: 200px;
+  min-height: 140px;
   background: transparent;
   border: none;
-  padding: 14px 16px;
+  padding: 16px 18px;
   color: var(--text);
   font-family: 'Courier New', Courier, monospace;
-  font-size: .86rem;
-  line-height: 1.65;
+  font-size: .92rem;
+  line-height: 1.85;
+  letter-spacing: .01em;
   resize: vertical;
   outline: none;
   display: block;
