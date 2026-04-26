@@ -53,6 +53,7 @@ db.defaults({
   dbTemplates: [],   // { id, name, description, category, icon, databases:[{name,fields}], relationships:[{fromDb,fromField,toDb,toField,type}], createdBy, createdAt }
   backupSchedule:        24, // hours between auto-backups; 0 = disabled
   backupRetentionCount:   5, // number of full_*.json snapshots to keep (N-1 rotation)
+  drafts:                [], // { id, type, databaseId, recordId, data, liveSnapshot, note, createdBy, createdAt }
 }).write();
 
 // ─── Activity log helper ──────────────────────────────────────────────────────
@@ -1003,6 +1004,135 @@ app.delete('/api/databases/:dbId/records/:id', requireMember, (req, res) => {
   fireWebhooks('record.deleted', { database: recDb?.name, databaseId: req.params.dbId, recordId: req.params.id, triggeredBy: user.username });
   broadcastWS('record_deleted', recDb?.name, req.params.dbId, { id: req.params.id, deletedBy: user.username });
   res.json({ message: 'Record deleted' });
+});
+
+// ─── Draft Mode ───────────────────────────────────────────────────────────────
+
+// GET /api/databases/:dbId/drafts
+app.get('/api/databases/:dbId/drafts', requireAuth, (req, res) => {
+  if (!db.get('databases').find({ id: req.params.dbId }).value()) {
+    return res.status(404).json({ error: 'Database not found' });
+  }
+  res.json(db.get('drafts').filter({ databaseId: req.params.dbId }).value());
+});
+
+// POST /api/databases/:dbId/drafts — save a draft (type: create | update | delete)
+app.post('/api/databases/:dbId/drafts', requireMember, (req, res) => {
+  const database = db.get('databases').find({ id: req.params.dbId }).value();
+  if (!database) return res.status(404).json({ error: 'Database not found' });
+
+  const { type, recordId, data, note } = req.body;
+  if (!['create', 'update', 'delete'].includes(type)) {
+    return res.status(400).json({ error: 'type must be create, update, or delete' });
+  }
+  if ((type === 'update' || type === 'delete') && !recordId) {
+    return res.status(400).json({ error: 'recordId required for update/delete drafts' });
+  }
+
+  let liveSnapshot = null;
+  if (recordId) {
+    const live = db.get('records').find({ id: recordId, databaseId: req.params.dbId }).value();
+    if (!live) return res.status(404).json({ error: 'Record not found' });
+    liveSnapshot = live.data;
+  }
+
+  let validatedData = null;
+  if (type !== 'delete') {
+    const v = validateRecordData(data || {}, database.fields);
+    if (v.error) return res.status(400).json({ error: v.error });
+    validatedData = v.data;
+  }
+
+  const user = getAuthUser(req);
+  // Upsert: replace any existing draft for same record + type
+  if (recordId) db.get('drafts').remove({ databaseId: req.params.dbId, recordId, type }).write();
+
+  const draft = {
+    id: uuidv4(), type,
+    databaseId:   req.params.dbId,
+    recordId:     recordId || null,
+    data:         validatedData,
+    liveSnapshot,
+    note:         note || '',
+    createdBy:    user.username,
+    createdAt:    new Date().toISOString(),
+  };
+  db.get('drafts').push(draft).write();
+  logActivity('draft_saved', user.username, database.name, `${type} draft`);
+  res.status(201).json(draft);
+});
+
+// POST /api/drafts/:draftId/publish — apply a single draft to live data
+app.post('/api/drafts/:draftId/publish', requireMember, (req, res) => {
+  const draft = db.get('drafts').find({ id: req.params.draftId }).value();
+  if (!draft) return res.status(404).json({ error: 'Draft not found' });
+
+  const database = db.get('databases').find({ id: draft.databaseId }).value();
+  const user = getAuthUser(req);
+
+  if (draft.type === 'create') {
+    const rec = { id: uuidv4(), databaseId: draft.databaseId, data: draft.data,
+      createdBy: draft.createdBy, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    db.get('records').push(rec).write();
+    fireWebhooks('record.created', { database: database?.name, databaseId: draft.databaseId, record: { id: rec.id, ...rec.data }, triggeredBy: user.username });
+    broadcastWS('record_added', database?.name, draft.databaseId, { id: rec.id, ...rec.data });
+  } else if (draft.type === 'update') {
+    if (!db.get('records').find({ id: draft.recordId }).value()) {
+      db.get('drafts').remove({ id: draft.id }).write();
+      return res.status(404).json({ error: 'Record no longer exists — draft discarded' });
+    }
+    db.get('records').find({ id: draft.recordId })
+      .assign({ data: draft.data, updatedAt: new Date().toISOString() }).write();
+    const upd = db.get('records').find({ id: draft.recordId }).value();
+    fireWebhooks('record.updated', { database: database?.name, databaseId: draft.databaseId, record: { id: upd.id, ...upd.data }, triggeredBy: user.username });
+    broadcastWS('record_updated', database?.name, draft.databaseId, { id: upd.id, ...upd.data });
+  } else if (draft.type === 'delete') {
+    db.get('records').remove({ id: draft.recordId }).write();
+    fireWebhooks('record.deleted', { database: database?.name, databaseId: draft.databaseId, recordId: draft.recordId, triggeredBy: user.username });
+    broadcastWS('record_deleted', database?.name, draft.databaseId, { id: draft.recordId });
+  }
+
+  db.get('drafts').remove({ id: draft.id }).write();
+  logActivity('draft_published', user.username, database?.name || draft.databaseId, `Published ${draft.type} draft`);
+  res.json({ message: `Draft published (${draft.type})` });
+});
+
+// POST /api/databases/:dbId/drafts/publish-all — publish every pending draft (admin)
+app.post('/api/databases/:dbId/drafts/publish-all', requireAdmin, (req, res) => {
+  const drafts   = db.get('drafts').filter({ databaseId: req.params.dbId }).value();
+  const database = db.get('databases').find({ id: req.params.dbId }).value();
+  const user     = getAuthUser(req);
+  let published  = 0;
+
+  for (const draft of drafts) {
+    try {
+      if (draft.type === 'create') {
+        db.get('records').push({ id: uuidv4(), databaseId: draft.databaseId, data: draft.data,
+          createdBy: draft.createdBy, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }).write();
+      } else if (draft.type === 'update' && db.get('records').find({ id: draft.recordId }).value()) {
+        db.get('records').find({ id: draft.recordId })
+          .assign({ data: draft.data, updatedAt: new Date().toISOString() }).write();
+      } else if (draft.type === 'delete') {
+        db.get('records').remove({ id: draft.recordId }).write();
+      }
+      db.get('drafts').remove({ id: draft.id }).write();
+      published++;
+    } catch (_) { /* skip broken draft */ }
+  }
+  logActivity('draft_publish_all', user.username, database?.name || req.params.dbId, `Published ${published} draft(s)`);
+  res.json({ published, message: `${published} draft(s) published` });
+});
+
+// DELETE /api/drafts/:draftId — discard a draft
+app.delete('/api/drafts/:draftId', requireMember, (req, res) => {
+  const draft = db.get('drafts').find({ id: req.params.draftId }).value();
+  if (!draft) return res.status(404).json({ error: 'Draft not found' });
+  const user = getAuthUser(req);
+  if (user.role === 'member' && draft.createdBy !== user.username) {
+    return res.status(403).json({ error: 'You can only discard your own drafts' });
+  }
+  db.get('drafts').remove({ id: req.params.draftId }).write();
+  res.json({ message: 'Draft discarded' });
 });
 
 // ─── Activity log (admin only) ────────────────────────────────────────────────

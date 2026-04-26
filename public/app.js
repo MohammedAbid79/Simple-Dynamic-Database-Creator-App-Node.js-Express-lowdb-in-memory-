@@ -2,6 +2,7 @@
 let currentUser  = null;
 let currentDb    = null;   // active database object when in records view
 let allRecords   = [];     // full unfiltered record list for current db
+let allDrafts    = [];     // pending drafts for current db
 
 /* ── Shared SVG icon snippets for dynamically generated HTML ──────────────── */
 const IC = {
@@ -706,8 +707,13 @@ document.getElementById('btn-export-csv').onclick = () => {
 };
 
 async function loadRecords() {
-  allRecords = await api('GET', `/databases/${currentDb.id}/records`);
+  [allRecords, allDrafts] = await Promise.all([
+    api('GET', `/databases/${currentDb.id}/records`),
+    api('GET', `/databases/${currentDb.id}/drafts`).catch(() => []),
+  ]);
   renderRecords(allRecords);
+  renderDraftsPanel();
+  _updateDraftBadge();
 }
 
 function renderRecords(records) {
@@ -725,15 +731,18 @@ function renderRecords(records) {
     `<th>${esc(f.name)} <span class="badge badge-${f.type}">${f.type}</span></th>`).join('');
 
   const rows = records.map(r => {
-    const canEdit = currentUser.role !== 'guest' &&
+    const canEdit   = currentUser.role !== 'guest' &&
       (currentUser.role === 'admin' || r.createdBy === currentUser.username);
-    const cells   = currentDb.fields.map(f => {
+    const hasDraft  = allDrafts.some(d => d.recordId === r.id);
+    const draftBadge = hasDraft
+      ? `<span class="draft-row-badge" title="Pending draft changes">Draft</span>` : '';
+    const cells = currentDb.fields.map(f => {
       const v = r.data[f.name];
       return `<td>${v === null || v === undefined ? '<span style="color:var(--text-muted)">—</span>' : esc(String(v))}</td>`;
     }).join('');
-    return `<tr>
+    return `<tr${hasDraft ? ' class="has-draft"' : ''}>
       ${cells}
-      <td><span style="color:var(--text-muted);font-size:.75rem">${esc(r.createdBy)}</span></td>
+      <td><span style="color:var(--text-muted);font-size:.75rem">${esc(r.createdBy)}</span>${draftBadge}</td>
       <td>${fmtDate(r.updatedAt)}</td>
       <td>
         <div class="actions-cell">
@@ -756,11 +765,16 @@ document.getElementById('btn-add-record').onclick = () => {
     const data = collectRecordData();
     try {
       await api('POST', `/databases/${currentDb.id}/records`, { data });
-      closeModal();
-      toast('Record added!', 'success');
-      loadRecords();
+      closeModal(); toast('Record added!', 'success'); loadRecords();
     } catch (err) { toast(err.message, 'error'); }
   }, 'Add Record');
+  _injectDraftBtn(async () => {
+    const data = collectRecordData();
+    try {
+      await api('POST', `/databases/${currentDb.id}/drafts`, { type: 'create', data });
+      closeModal(); toast('Saved as draft — publish when ready', 'success'); loadRecords();
+    } catch (err) { toast(err.message, 'error'); }
+  });
 };
 
 function buildRecordForm(record) {
@@ -832,24 +846,141 @@ async function editRecord(recordId) {
     const data = collectRecordData();
     try {
       await api('PUT', `/databases/${currentDb.id}/records/${recordId}`, { data });
-      closeModal();
-      toast('Record updated!', 'success');
-      loadRecords();
+      closeModal(); toast('Record updated!', 'success'); loadRecords();
     } catch (err) { toast(err.message, 'error'); }
   }, 'Save Changes');
+
+  _injectDraftBtn(async () => {
+    const data = collectRecordData();
+    try {
+      await api('POST', `/databases/${currentDb.id}/drafts`, { type: 'update', recordId, data });
+      closeModal(); toast('Saved as draft — publish when ready', 'success'); loadRecords();
+    } catch (err) { toast(err.message, 'error'); }
+  });
 }
 
 // ── Delete record ───────────────────────────────────────────────────────────
 function deleteRecord(recordId) {
-  openModal('Confirm Delete', `<p>Delete this record? This cannot be undone.</p>`,
+  openModal('Confirm Delete',
+    `<p>Delete this record immediately, or stage it as a draft delete to review first.</p>`,
     async () => {
       try {
         await api('DELETE', `/databases/${currentDb.id}/records/${recordId}`);
-        closeModal();
-        toast('Record deleted', 'success');
-        loadRecords();
+        closeModal(); toast('Record deleted', 'success'); loadRecords();
       } catch (err) { toast(err.message, 'error'); }
-    }, 'Delete');
+    }, 'Delete Now');
+
+  _injectDraftBtn(async () => {
+    try {
+      await api('POST', `/databases/${currentDb.id}/drafts`, { type: 'delete', recordId });
+      closeModal(); toast('Delete staged as draft', 'success'); loadRecords();
+    } catch (err) { toast(err.message, 'error'); }
+  }, 'Stage Delete');
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   DRAFT MODE
+   ════════════════════════════════════════════════════════════════════════════ */
+
+// Inject a "Save as Draft" button into the currently open modal footer
+function _injectDraftBtn(onClick, label = 'Save as Draft') {
+  if (currentUser.role === 'guest') return;
+  const footer = document.querySelector('.modal-footer');
+  if (!footer) return;
+  const btn = document.createElement('button');
+  btn.className = 'btn btn-outline';
+  btn.textContent = label;
+  btn.onclick = onClick;
+  footer.insertBefore(btn, footer.querySelector('#modal-submit'));
+}
+
+function _updateDraftBadge() {
+  const countEl  = document.getElementById('draft-count-badge');
+  const toggleEl = document.getElementById('btn-toggle-drafts');
+  if (!countEl || !toggleEl) return;
+  const n = allDrafts.length;
+  countEl.textContent  = n;
+  toggleEl.style.display = n > 0 ? '' : 'none';
+}
+
+function renderDraftsPanel() {
+  const panel = document.getElementById('drafts-panel');
+  if (!panel) return;
+  if (!allDrafts.length) { panel.innerHTML = ''; return; }
+
+  const TYPE_LABEL = { create: 'New Record', update: 'Edit', delete: 'Delete' };
+  const TYPE_CLS   = { create: 'draft-type-create', update: 'draft-type-update', delete: 'draft-type-delete' };
+
+  const cards = allDrafts.map(d => {
+    let diffHtml = '';
+    if (d.type === 'update' && d.liveSnapshot) {
+      const changes = Object.entries(d.data)
+        .filter(([k, v]) => String(v) !== String(d.liveSnapshot[k] ?? ''));
+      diffHtml = changes.length
+        ? `<div class="draft-diff">${changes.map(([k, v]) =>
+            `<div class="draft-diff-row">
+              <span class="draft-field-name">${esc(k)}</span>
+              <span class="draft-val-old">${esc(String(d.liveSnapshot[k] ?? '—'))}</span>
+              <span class="draft-arrow">→</span>
+              <span class="draft-val-new">${esc(String(v))}</span>
+            </div>`).join('')}</div>`
+        : `<span class="draft-no-change">No field changes</span>`;
+    } else if (d.type === 'create') {
+      const pills = Object.entries(d.data || {})
+        .map(([k, v]) => `<span class="draft-pill"><b>${esc(k)}</b>: ${esc(String(v))}</span>`).join('');
+      diffHtml = `<div class="draft-pills">${pills}</div>`;
+    } else if (d.type === 'delete') {
+      diffHtml = `<span class="draft-delete-warn">This record will be permanently removed on publish.</span>`;
+    }
+
+    const canAct = currentUser.role === 'admin' || d.createdBy === currentUser.username;
+    return `<div class="draft-card">
+      <div class="draft-card-header">
+        <span class="draft-type-badge ${TYPE_CLS[d.type]}">${TYPE_LABEL[d.type]}</span>
+        <span class="draft-card-meta">${esc(d.createdBy)} · ${fmtDate(d.createdAt)}</span>
+      </div>
+      ${diffHtml}
+      ${canAct ? `<div class="draft-card-actions">
+        <button class="btn btn-primary btn-xs" onclick="publishDraft('${d.id}')">Publish</button>
+        <button class="btn btn-danger btn-xs" onclick="discardDraft('${d.id}')">Discard</button>
+      </div>` : ''}
+    </div>`;
+  }).join('');
+
+  const publishAll = currentUser.role === 'admin'
+    ? `<button class="btn btn-sm btn-primary" onclick="publishAllDrafts()">Publish All</button>` : '';
+
+  panel.innerHTML = `<div class="drafts-panel">
+    <div class="drafts-panel-title">
+      <span>Pending Drafts <span class="draft-count-badge">${allDrafts.length}</span></span>
+      ${publishAll}
+    </div>
+    <div class="drafts-cards">${cards}</div>
+  </div>`;
+}
+
+async function publishDraft(draftId) {
+  try {
+    const res = await api('POST', `/drafts/${draftId}/publish`);
+    toast(res.message || 'Draft published', 'success');
+    loadRecords();
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function discardDraft(draftId) {
+  try {
+    await api('DELETE', `/drafts/${draftId}`);
+    toast('Draft discarded', 'success');
+    loadRecords();
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function publishAllDrafts() {
+  try {
+    const res = await api('POST', `/databases/${currentDb.id}/drafts/publish-all`);
+    toast(res.message || 'All drafts published', 'success');
+    loadRecords();
+  } catch (err) { toast(err.message, 'error'); }
 }
 
 /* ════════════════════════════════════════════════════════════════════════════

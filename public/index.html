@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FluxDB</title>
   <link rel="stylesheet" href="/fonts/inter.css" />
-  <link rel="stylesheet" href="/style.css?v=30" />
+  <link rel="stylesheet" href="/style.css?v=31" />
 </head>
 <body>
   <!-- ── App Shell ── -->
@@ -314,8 +314,13 @@
             Export CSV
           </button>
           <button id="btn-add-record" class="btn btn-primary">+ Add Record</button>
+          <button id="btn-toggle-drafts" class="btn btn-outline draft-toggle-btn" style="display:none">
+            <svg class="bi" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h10M2 7h7M2 11h5"/><circle cx="12" cy="11" r="1.8" fill="currentColor" stroke="none"/></svg>
+            Drafts <span id="draft-count-badge" class="draft-count-badge">0</span>
+          </button>
         </div>
         <div id="record-list" class="table-wrap"></div>
+        <div id="drafts-panel"></div>
       </div>
 
       <!-- API Keys View -->
@@ -732,6 +737,6 @@
     </div>
   </div>
 
-  <script src="/app.js?v=26"></script>
+  <script src="/app.js?v=27"></script>
 </body>
 </html>
