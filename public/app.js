@@ -147,7 +147,7 @@ document.querySelectorAll('.nav-btn[data-view]').forEach(btn => {
     if (btn.dataset.view === 'webhooks')    loadWebhooks();
     if (btn.dataset.view === 'credentials') loadCredentials();
     if (btn.dataset.view === 'backups')     loadBackups();
-    if (btn.dataset.view === 'applogs')    loadAppLogs();
+    if (btn.dataset.view === 'applogs')    { _populateLogDates().then(loadAppLogs); }
     if (btn.dataset.view === 'stream')      initStreamView();
     if (btn.dataset.view === 'relations')   loadRelations();
     if (btn.dataset.view === 'dbtemplates') loadDbTemplates();
@@ -4685,23 +4685,37 @@ document.getElementById('btn-create-tpl').onclick = () => openCreateTplModal(nul
 // ─── App Logs view ────────────────────────────────────────────────────────────
 let _logLevel = '';
 
+async function _populateLogDates() {
+  const sel = document.getElementById('log-date-select');
+  if (!sel) return;
+  try {
+    const dates = await api('GET', '/logs/dates');
+    const today = new Date().toISOString().slice(0, 10);
+    sel.innerHTML = dates.map(d =>
+      `<option value="${esc(d)}"${d === today ? ' selected' : ''}>${esc(d === today ? `${d} (today)` : d)}</option>`
+    ).join('') || '<option value="">Today</option>';
+  } catch { /* leave default */ }
+}
+
 async function loadAppLogs() {
   const container = document.getElementById('log-entries');
   container.innerHTML = '<p style="color:var(--text-muted);padding:20px 0">Loading…</p>';
   try {
-    const params  = _logLevel ? `?level=${_logLevel}&limit=300` : '?limit=300';
-    const entries = await api('GET', `/logs${params}`);
+    const date    = document.getElementById('log-date-select')?.value || '';
+    const params  = new URLSearchParams({ limit: 500 });
+    if (_logLevel) params.set('level', _logLevel);
+    if (date)      params.set('date', date);
+    const entries = await api('GET', `/logs?${params}`);
     if (!entries.length) {
-      container.innerHTML = '<p class="empty-state">No log entries found.</p>';
+      container.innerHTML = '<p class="empty-state">No log entries for this date / filter.</p>';
       return;
     }
     container.innerHTML = entries.map(e => {
-      const lvl     = e.level || 'INFO';
-      const meta    = e.meta ? `<pre class="log-entry-meta">${esc(JSON.stringify(e.meta, null, 2))}</pre>` : '';
-      const tsShort = e.ts ? new Date(e.ts).toLocaleString() : '—';
+      const lvl  = e.level || 'INFO';
+      const meta = e.meta ? `<pre class="log-entry-meta">${esc(JSON.stringify(e.meta, null, 2))}</pre>` : '';
       return `<div class="log-entry log-entry-${lvl.toLowerCase()}">
         <span class="log-badge log-badge-${lvl.toLowerCase()}">${esc(lvl)}</span>
-        <span class="log-entry-ts">${tsShort}</span>
+        <span class="log-entry-ts">${e.ts ? new Date(e.ts).toLocaleString() : '—'}</span>
         <span class="log-entry-msg">${esc(e.msg || '')}</span>
         ${meta}
       </div>`;
@@ -4710,6 +4724,9 @@ async function loadAppLogs() {
     container.innerHTML = `<p class="empty-state" style="color:var(--danger)">${esc(err.message)}</p>`;
   }
 }
+
+// Date selector
+document.getElementById('log-date-select').addEventListener('change', loadAppLogs);
 
 // Level pill filter
 document.getElementById('log-level-pills').addEventListener('click', e => {
@@ -4721,13 +4738,14 @@ document.getElementById('log-level-pills').addEventListener('click', e => {
   loadAppLogs();
 });
 
-document.getElementById('btn-refresh-logs').onclick = loadAppLogs;
+document.getElementById('btn-refresh-logs').onclick = () => { _populateLogDates(); loadAppLogs(); };
 
 document.getElementById('btn-clear-logs').onclick = () => {
-  openModal('Clear Logs', '<p>Delete all current log entries? Rotated files are kept.</p>',
+  openModal('Clear Today\'s Logs', '<p>Delete all log entries for today? Logs from other days are kept.</p>',
     async () => {
       await api('DELETE', '/logs');
-      toast('Logs cleared', 'success');
+      closeModal();
+      toast('Today\'s log cleared', 'success');
       loadAppLogs();
-    }, 'Clear');
+    }, 'Clear Today');
 };

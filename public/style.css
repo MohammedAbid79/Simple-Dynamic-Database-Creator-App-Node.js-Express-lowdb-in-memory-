@@ -2838,6 +2838,17 @@ table, thead th, tbody td, tr,
 }
 
 /* ── App Logs view ────────────────────────────────────────────────────────── */
+.log-date-select {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface2);
+  color: var(--text);
+  font-size: .82rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+
 .log-level-pills {
   display: flex;
   gap: 4px;

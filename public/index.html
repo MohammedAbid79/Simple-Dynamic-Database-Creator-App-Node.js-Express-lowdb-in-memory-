@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FluxDB</title>
   <link rel="stylesheet" href="/fonts/inter.css" />
-  <link rel="stylesheet" href="/style.css?v=31" />
+  <link rel="stylesheet" href="/style.css?v=32" />
 </head>
 <body>
   <!-- ── App Shell ── -->
@@ -513,6 +513,9 @@
         <div class="view-header">
           <h2>App Logs</h2>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <select id="log-date-select" class="log-date-select" title="Select log date">
+              <option value="">Today</option>
+            </select>
             <div class="log-level-pills" id="log-level-pills">
               <button class="log-level-pill active" data-level="">All</button>
               <button class="log-level-pill" data-level="ERROR">Error</button>
@@ -525,7 +528,7 @@
             </button>
             <button id="btn-clear-logs" class="btn btn-outline btn-sm" style="color:var(--danger)">
               <svg class="bi" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="1.5 3.5 12.5 3.5"/><path d="M4 3.5V2h6v1.5"/><path d="M5 6v4M9 6v4"/><path d="M2.5 3.5l.9 8.5h7.2l.9-8.5"/></svg>
-              Clear
+              Clear Today
             </button>
           </div>
         </div>
@@ -737,6 +740,6 @@
     </div>
   </div>
 
-  <script src="/app.js?v=27"></script>
+  <script src="/app.js?v=28"></script>
 </body>
 </html>

@@ -3,63 +3,87 @@
 const fs   = require('fs');
 const path = require('path');
 
-const LOG_DIR  = path.join(__dirname, 'logs');
-const LOG_FILE = path.join(LOG_DIR, 'app.log');
-const MAX_SIZE = 5 * 1024 * 1024;  // rotate at 5 MB
-const MAX_ROTATED = 5;              // keep at most 5 old files
+const LOG_DIR   = path.join(__dirname, 'logs');
+const KEEP_DAYS = 7;   // delete log files older than this many days
 
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 
-function rotate() {
-  try {
-    const stat = fs.statSync(LOG_FILE);
-    if (stat.size < MAX_SIZE) return;
-
-    // Shift existing rotated files: app.log.4 → deleted, app.log.3 → .4, …
-    for (let i = MAX_ROTATED - 1; i >= 1; i--) {
-      const src  = `${LOG_FILE}.${i}`;
-      const dest = `${LOG_FILE}.${i + 1}`;
-      if (fs.existsSync(src)) {
-        if (i === MAX_ROTATED - 1) fs.unlinkSync(src);
-        else fs.renameSync(src, dest);
-      }
-    }
-    fs.renameSync(LOG_FILE, `${LOG_FILE}.1`);
-  } catch (_) { /* rotation errors are non-fatal */ }
+// ─── Date helpers ─────────────────────────────────────────────────────────────
+function todayTag() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+function logFilePath(tag = todayTag()) {
+  return path.join(LOG_DIR, `app-${tag}.log`);
+}
+
+// ─── Pruning ──────────────────────────────────────────────────────────────────
+function pruneOldLogs() {
+  try {
+    const cutoff = Date.now() - KEEP_DAYS * 86_400_000;
+    for (const f of fs.readdirSync(LOG_DIR)) {
+      if (!/^app-\d{4}-\d{2}-\d{2}\.log$/.test(f)) continue;
+      const full = path.join(LOG_DIR, f);
+      if (fs.statSync(full).mtimeMs < cutoff) {
+        fs.unlinkSync(full);
+      }
+    }
+  } catch (_) {}
+}
+
+// Prune at startup, then once per hour so midnight rolls cleanly
+pruneOldLogs();
+let _lastDay = todayTag();
+setInterval(() => {
+  const today = todayTag();
+  if (today !== _lastDay) { _lastDay = today; pruneOldLogs(); }
+}, 60 * 60 * 1000).unref();
+
+// ─── Write ────────────────────────────────────────────────────────────────────
 function write(level, msg, meta) {
   const entry = { ts: new Date().toISOString(), level, msg };
   if (meta !== undefined) entry.meta = meta;
 
-  // Console output with colour hints
   const line = `[${entry.ts}] [${level}] ${msg}${meta !== undefined ? ' ' + JSON.stringify(meta) : ''}`;
   if      (level === 'ERROR') console.error(line);
   else if (level === 'WARN')  console.warn(line);
   else                        console.log(line);
 
-  // File output (best-effort)
-  try {
-    rotate();
-    fs.appendFileSync(LOG_FILE, JSON.stringify(entry) + '\n');
-  } catch (_) {}
+  try { fs.appendFileSync(logFilePath(), JSON.stringify(entry) + '\n'); } catch (_) {}
 }
 
-// Return the last `n` parsed log entries from the current log file
-function tail(n = 200) {
+// ─── Read ─────────────────────────────────────────────────────────────────────
+
+// Return up to `n` log entries for `date` (default today), newest first.
+// Optionally filter by `level`.
+function tail(n = 200, level, date) {
   try {
-    const raw  = fs.readFileSync(LOG_FILE, 'utf8').trim();
+    const raw = fs.readFileSync(logFilePath(date || todayTag()), 'utf8').trim();
     if (!raw) return [];
-    return raw.split('\n').slice(-n).map(line => {
+    let entries = raw.split('\n').map(line => {
       try { return JSON.parse(line); }
       catch { return { ts: '', level: 'INFO', msg: line }; }
     });
+    if (level) entries = entries.filter(e => e.level === level);
+    return entries.slice(-n).reverse();
   } catch { return []; }
 }
 
-// Clear the current log file (keep rotated files intact)
+// Return list of available log dates, newest first
+function listDates() {
+  try {
+    return fs.readdirSync(LOG_DIR)
+      .filter(f => /^app-\d{4}-\d{2}-\d{2}\.log$/.test(f))
+      .map(f => f.slice(4, -4))   // strip "app-" prefix and ".log" suffix
+      .sort()
+      .reverse();
+  } catch { return []; }
+}
+
+// Clear today's log file only
 function clear() {
-  try { fs.writeFileSync(LOG_FILE, ''); } catch (_) {}
+  try { fs.writeFileSync(logFilePath(), ''); } catch (_) {}
 }
 
 module.exports = {
@@ -68,4 +92,6 @@ module.exports = {
   error: (msg, meta) => write('ERROR', msg, meta),
   tail,
   clear,
+  listDates,
+  todayTag,
 };

@@ -63,8 +63,12 @@ function logActivity(action, user, target, detail) {
     target: target || '', detail: detail || '',
     timestamp: new Date().toISOString(),
   }).write();
-  const all = db.get('activityLog').value();
-  if (all.length > 200) db.set('activityLog', all.slice(-200)).write();
+
+  // Prune: keep only last 7 days, hard cap 1000 entries
+  const cutoff = new Date(Date.now() - 7 * 86_400_000).toISOString();
+  const all    = db.get('activityLog').value();
+  const pruned = all.filter(e => e.timestamp >= cutoff).slice(-1000);
+  if (pruned.length < all.length) db.set('activityLog', pruned).write();
 }
 
 // ─── Auth user helper ─────────────────────────────────────────────────────────
