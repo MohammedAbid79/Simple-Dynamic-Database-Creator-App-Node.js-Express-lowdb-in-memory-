@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FluxDB</title>
   <link rel="stylesheet" href="/fonts/inter.css" />
-  <link rel="stylesheet" href="/style.css?v=33" />
+  <link rel="stylesheet" href="/style.css?v=34" />
 </head>
 <body>
   <!-- ── App Shell ── -->
@@ -563,8 +563,7 @@
           <!-- Editor + results -->
           <div class="query-main">
             <div class="query-editor-wrap">
-              <textarea id="query-input" class="query-editor" spellcheck="false"
-                placeholder="-- SQL syntax&#10;SELECT name, email FROM users WHERE age > 25 ORDER BY name LIMIT 50&#10;&#10;-- Fluent syntax&#10;users.where(age > 25).select(name, email).order(name).limit(50)&#10;&#10;-- Aggregates (fluent)&#10;orders.where(total > 100).group(status).count().sum(total)&#10;&#10;-- Aggregates (SQL)&#10;SELECT status, COUNT(*) AS cnt, SUM(total) AS sum_total&#10;FROM orders WHERE total > 100 GROUP BY status"></textarea>
+              <textarea id="query-input" class="query-editor" spellcheck="false"></textarea>
               <div class="query-toolbar">
                 <button id="btn-run-query" class="btn btn-primary btn-sm">
                   <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor" stroke="none" aria-hidden="true">
@@ -577,7 +576,7 @@
               </div>
             </div>
             <div id="query-results" class="query-results-wrap">
-              <div class="query-empty-state">Write a query above and press <strong>Run</strong> to see results.</div>
+              <div class="query-empty-state"><span>Write a query above and press <strong>Run</strong> to see results.</span></div>
             </div>
           </div>
         </div>
@@ -740,6 +739,6 @@
     </div>
   </div>
 
-  <script src="/app.js?v=28"></script>
+  <script src="/app.js?v=29"></script>
 </body>
 </html>

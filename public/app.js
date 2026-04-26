@@ -1925,12 +1925,28 @@ function insertFieldName(name) {
   el.focus();
 }
 
+// Set placeholder via JS so newlines are guaranteed real characters
+document.getElementById('query-input').placeholder =
+`-- SQL syntax
+SELECT name, email FROM users WHERE age > 25 ORDER BY name LIMIT 50
+
+-- Fluent syntax
+users.where(age > 25).select(name, email).order(name).limit(50)
+
+-- Aggregates (fluent)
+orders.where(total > 100).group(status).count().sum(total)
+
+-- Aggregates (SQL)
+SELECT status, COUNT(*) AS cnt, SUM(total) AS sum_total
+FROM orders WHERE total > 100 GROUP BY status`;
+
+const _QUERY_EMPTY_HTML = '<div class="query-empty-state"><span>Write a query above and press <strong>Run</strong> to see results.</span></div>';
+
 // ── Run query ─────────────────────────────────────────────────────────────────
 document.getElementById('btn-run-query').addEventListener('click', runQuery);
 document.getElementById('btn-clear-query').addEventListener('click', () => {
   document.getElementById('query-input').value = '';
-  document.getElementById('query-results').innerHTML =
-    '<div class="query-empty-state">Write a query above and press <strong>Run</strong> to see results.</div>';
+  document.getElementById('query-results').innerHTML = _QUERY_EMPTY_HTML;
   document.getElementById('query-input').focus();
 });
 document.getElementById('query-input').addEventListener('keydown', e => {
@@ -1967,7 +1983,7 @@ function renderQueryResults(el, { columns, rows, rowCount, elapsed, truncated, i
     : '';
 
   if (!columns.length) {
-    el.innerHTML = translatedBanner + '<div class="query-empty-state">Query returned no results.</div>';
+    el.innerHTML = translatedBanner + '<div class="query-empty-state"><span>Query returned no results.</span></div>';
     return;
   }
 
