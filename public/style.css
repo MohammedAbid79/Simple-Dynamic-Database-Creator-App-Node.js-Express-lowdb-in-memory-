@@ -3212,3 +3212,275 @@ tr.has-draft > td:first-child {
   font-size: .78rem;
   font-family: 'Courier New', monospace;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   DESIGN ENHANCEMENTS v36 — refined atmosphere, micro-interactions, depth
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Page chrome ───────────────────────────────────────────────────────── */
+html { background: var(--bg); }
+
+/* Richer ambient gradient in the main workspace */
+#main-content {
+  background:
+    radial-gradient(ellipse 60% 40% at 82% 8%,  rgba(101,116,255,.07) 0%, transparent 62%),
+    radial-gradient(ellipse 38% 28% at 12% 88%, rgba(45,206,137,.04)  0%, transparent 55%),
+    var(--bg);
+}
+
+/* ── Sidebar: tinted header, livelier brand name ───────────────────────── */
+.sidebar-header {
+  background: linear-gradient(180deg, rgba(101,116,255,.06) 0%, transparent 100%);
+}
+
+.sidebar-title {
+  background: linear-gradient(115deg, var(--text) 0%, var(--accent-h) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Nav: hover preview indicator ─────────────────────────────────────── */
+.nav-btn:hover {
+  box-shadow: inset 2px 0 0 rgba(101,116,255,.3);
+}
+
+/* ── Nav active: glowing icon ─────────────────────────────────────────── */
+.nav-btn.active {
+  background: linear-gradient(90deg, rgba(101,116,255,.16) 0%, rgba(101,116,255,.04) 100%);
+}
+.nav-btn.active .nav-icon {
+  filter: drop-shadow(0 0 5px rgba(101,116,255,.55));
+}
+
+/* Collapsed sidebar: simpler active indicator (no left inset shows) */
+#sidebar.collapsed .nav-btn.active {
+  box-shadow: none;
+  background: var(--accent-dim);
+}
+
+/* ── Sidebar user profile: hover card ─────────────────────────────────── */
+.user-profile {
+  transition: background var(--t) var(--ease);
+  border-radius: 8px;
+  cursor: default;
+}
+.user-profile:hover { background: var(--surface2); }
+.user-profile:hover .user-avatar {
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 4px var(--accent),
+    0 4px 14px rgba(101,116,255,.28);
+}
+
+/* ── View header: gradient accent rule below title ─────────────────────── */
+.view-header {
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 24px;
+  position: relative;
+}
+.view-header::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  width: 72px;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), transparent);
+  border-radius: 2px;
+}
+.view-header h2 { font-size: 1.12rem; }
+
+/* ── Database cards: accent reveal on hover ────────────────────────────── */
+.db-card { position: relative; overflow: hidden; }
+
+.db-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent) 0%, #7c89ff 55%, #5eead4 100%);
+  opacity: 0;
+  transition: opacity var(--t) var(--ease);
+  pointer-events: none;
+  z-index: 1;
+}
+.db-card:hover::before { opacity: 1; }
+
+.db-card:hover {
+  box-shadow:
+    0 14px 44px rgba(0,0,0,.42),
+    0 0 0 1px rgba(101,116,255,.16),
+    0 4px 14px rgba(101,116,255,.11);
+}
+.db-card:hover .field-chip {
+  border-color: rgba(101,116,255,.22);
+}
+
+/* ── Dashboard stat cards: lift + border accent ────────────────────────── */
+.dash-stat-card {
+  position: relative;
+  overflow: hidden;
+  transition:
+    border-color var(--t) var(--ease),
+    box-shadow   var(--t) var(--ease),
+    background   var(--t) var(--ease),
+    transform    var(--t) var(--ease);
+}
+.dash-stat-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow:
+    0 10px 32px rgba(0,0,0,.35),
+    0 0 0 1px rgba(101,116,255,.14),
+    0 3px 10px rgba(101,116,255,.11);
+}
+.dash-stat-card.dash-stat-danger:hover { border-color: var(--danger); }
+
+/* Stat value: subtle two-tone gradient text */
+.dash-stat-value {
+  background: linear-gradient(135deg, var(--text) 30%, var(--text-muted) 180%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Dashboard panels: hover border ───────────────────────────────────── */
+.dash-panel { transition: border-color var(--t) var(--ease); }
+.dash-panel:hover { border-color: var(--border-h); }
+
+/* ── Dashboard db bar: gradient fill ──────────────────────────────────── */
+.dash-db-bar {
+  background: linear-gradient(90deg, var(--accent) 0%, #5eead4 100%);
+}
+
+/* ── Quick actions: left accent stripe ────────────────────────────────── */
+.dash-quickactions {
+  border-left: 3px solid var(--accent);
+  background:
+    linear-gradient(90deg, rgba(101,116,255,.04) 0%, transparent 50%),
+    var(--surface);
+}
+
+/* ── Staggered entrance animations ─────────────────────────────────────── */
+@keyframes cardIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.grid-cards .db-card            { animation: cardIn .32s var(--ease) both; }
+.grid-cards .db-card:nth-child(1)   { animation-delay: .00s; }
+.grid-cards .db-card:nth-child(2)   { animation-delay: .05s; }
+.grid-cards .db-card:nth-child(3)   { animation-delay: .09s; }
+.grid-cards .db-card:nth-child(4)   { animation-delay: .13s; }
+.grid-cards .db-card:nth-child(5)   { animation-delay: .16s; }
+.grid-cards .db-card:nth-child(6)   { animation-delay: .19s; }
+.grid-cards .db-card:nth-child(7)   { animation-delay: .21s; }
+.grid-cards .db-card:nth-child(n+8) { animation-delay: .23s; }
+
+.dash-stats-grid .dash-stat-card            { animation: cardIn .28s var(--ease) both; }
+.dash-stats-grid .dash-stat-card:nth-child(1)   { animation-delay: .02s; }
+.dash-stats-grid .dash-stat-card:nth-child(2)   { animation-delay: .07s; }
+.dash-stats-grid .dash-stat-card:nth-child(3)   { animation-delay: .11s; }
+.dash-stats-grid .dash-stat-card:nth-child(4)   { animation-delay: .15s; }
+.dash-stats-grid .dash-stat-card:nth-child(5)   { animation-delay: .18s; }
+.dash-stats-grid .dash-stat-card:nth-child(n+6) { animation-delay: .21s; }
+
+/* ── Primary button: shimmer sweep on hover ─────────────────────────────── */
+.btn-primary { position: relative; overflow: hidden; isolation: isolate; }
+.btn-primary::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg,
+    transparent 35%,
+    rgba(255,255,255,.15) 50%,
+    transparent 65%
+  );
+  transform: translateX(-100%);
+  transition: transform .5s ease;
+  pointer-events: none;
+}
+.btn-primary:hover::after { transform: translateX(100%); }
+
+/* ── Modal: accent top border + tinted header ──────────────────────────── */
+.modal { border-top: 2px solid var(--accent); }
+.modal-header {
+  background: linear-gradient(180deg, rgba(101,116,255,.05) 0%, transparent 100%);
+}
+
+/* ── Toast: left accent stripe per type ────────────────────────────────── */
+.toast              { border-left: 3px solid var(--border-h); }
+.toast.success      { border-left-color: var(--success); }
+.toast.error        { border-left-color: var(--danger);  }
+.toast.info         { border-left-color: var(--accent);  }
+
+/* ── Table: subtle alternating rows ────────────────────────────────────── */
+tbody tr:nth-child(even) { background: rgba(255,255,255,.013); }
+[data-theme="light"] tbody tr:nth-child(even) { background: rgba(0,0,0,.02); }
+
+/* Thicker, more visible header rule */
+thead th {
+  background: var(--surface2);
+  border-bottom-width: 2px;
+}
+
+/* ── Query editor wrap: focus ring ─────────────────────────────────────── */
+.query-editor-wrap:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+  transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
+}
+
+/* ── API card: accent on hover ─────────────────────────────────────────── */
+.api-card:hover {
+  border-color: rgba(101,116,255,.35);
+  box-shadow: 0 4px 20px rgba(101,116,255,.1);
+}
+
+/* ── Activity entry: icon tint on row hover ────────────────────────────── */
+.activity-entry:hover .activity-icon {
+  background: var(--accent-dim);
+  border-color: rgba(101,116,255,.25);
+}
+
+/* ── Record count badge: richer gradient ───────────────────────────────── */
+.record-count-badge {
+  background: linear-gradient(135deg, rgba(101,116,255,.16), rgba(101,116,255,.08));
+}
+
+/* ── Field chip: hover transition ──────────────────────────────────────── */
+.field-chip { transition: border-color var(--t) var(--ease); }
+
+/* ── Focus-visible: on-brand consistent outline ────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ── Scrollbar: slightly more prominent ────────────────────────────────── */
+::-webkit-scrollbar-thumb { background: var(--border-h); }
+
+/* ── Light theme tweaks ─────────────────────────────────────────────────── */
+[data-theme="light"] #main-content {
+  background:
+    radial-gradient(ellipse 60% 40% at 82% 8%,  rgba(79,93,224,.05) 0%, transparent 62%),
+    radial-gradient(ellipse 38% 28% at 12% 88%, rgba(31,184,122,.04) 0%, transparent 55%),
+    var(--bg);
+}
+[data-theme="light"] .db-card::before {
+  background: linear-gradient(90deg, var(--accent) 0%, #6474f5 55%, #0ea5e9 100%);
+}
+[data-theme="light"] .dash-db-bar {
+  background: linear-gradient(90deg, var(--accent) 0%, #0ea5e9 100%);
+}
+[data-theme="light"] .dash-quickactions {
+  background:
+    linear-gradient(90deg, rgba(79,93,224,.04) 0%, transparent 50%),
+    var(--surface);
+}
+[data-theme="light"] .sidebar-header {
+  background: linear-gradient(180deg, rgba(79,93,224,.05) 0%, transparent 100%);
+}
