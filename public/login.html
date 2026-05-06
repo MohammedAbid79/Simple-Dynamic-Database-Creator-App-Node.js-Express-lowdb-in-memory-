@@ -467,14 +467,14 @@
         const isDark = pref === 'dark'
           || (pref !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
         root.dataset.theme = isDark ? 'dark' : 'light';
-        if (sw) sw.checked = !isDark; /* checked = light (thumb right, towards moon) */
+        if (sw) sw.checked = isDark; /* checked = dark (thumb right = moon side) */
       }
 
       apply(localStorage.getItem(THEME_KEY) || 'system');
 
       if (sw) {
         sw.addEventListener('change', function () {
-          const pref = sw.checked ? 'light' : 'dark';
+          const pref = sw.checked ? 'dark' : 'light';
           localStorage.setItem(THEME_KEY, pref);
           apply(pref);
         });

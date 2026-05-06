@@ -115,14 +115,14 @@ const _themeSwitch = document.getElementById('theme-switch-input');
 function applyThemePref(pref) {
   const isLight = pref === 'light';
   document.documentElement.dataset.theme = isLight ? 'light' : 'dark';
-  if (_themeSwitch) _themeSwitch.checked = isLight;
+  if (_themeSwitch) _themeSwitch.checked = !isLight; // checked = dark (thumb right = moon side)
 }
 
 applyThemePref(localStorage.getItem(THEME_KEY) || 'dark');
 
 if (_themeSwitch) {
   _themeSwitch.addEventListener('change', () => {
-    const pref = _themeSwitch.checked ? 'light' : 'dark';
+    const pref = _themeSwitch.checked ? 'dark' : 'light';
     localStorage.setItem(THEME_KEY, pref);
     applyThemePref(pref);
   });
