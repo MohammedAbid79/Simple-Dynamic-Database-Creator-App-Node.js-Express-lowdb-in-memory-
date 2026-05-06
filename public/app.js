@@ -222,6 +222,294 @@ async function bootApp() {
 }
 
 /* ── Initialise: check existing session ────────────────────────────────────── */
+/* ════════════════════════════════════════════════════════════════════════════
+   FLUX BRAIN — Smart Session Memory (IndexedDB, zero-server, zero-perf-cost)
+   ════════════════════════════════════════════════════════════════════════════ */
+class FluxBrain {
+  constructor() {
+    this._db    = null;
+    this._ready = this._open();
+  }
+
+  _open() {
+    return new Promise(ok => {
+      const r = indexedDB.open('fluxdb-brain', 1);
+      r.onupgradeneeded = e => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('table_hits'))
+          db.createObjectStore('table_hits', { keyPath: 'name' });
+        if (!db.objectStoreNames.contains('join_patterns'))
+          db.createObjectStore('join_patterns', { keyPath: 'key' });
+        if (!db.objectStoreNames.contains('filter_patterns'))
+          db.createObjectStore('filter_patterns', { keyPath: 'key' });
+        if (!db.objectStoreNames.contains('recent_queries')) {
+          const s = db.createObjectStore('recent_queries', { keyPath: 'id', autoIncrement: true });
+          s.createIndex('byTable', 'table', { unique: false });
+        }
+      };
+      r.onsuccess = e => { this._db = e.target.result; ok(); };
+      r.onerror   = ()  => ok(); // silent fallback — app works without brain
+    });
+  }
+
+  _get(store, key) {
+    return new Promise(ok => {
+      if (!this._db) return ok(null);
+      const r = this._db.transaction([store], 'readonly').objectStore(store).get(key);
+      r.onsuccess = () => ok(r.result || null);
+      r.onerror   = () => ok(null);
+    });
+  }
+  _put(store, obj) {
+    return new Promise(ok => {
+      if (!this._db) return ok();
+      const r = this._db.transaction([store], 'readwrite').objectStore(store).put(obj);
+      r.onsuccess = () => ok(); r.onerror = () => ok();
+    });
+  }
+  _all(store) {
+    return new Promise(ok => {
+      if (!this._db) return ok([]);
+      const r = this._db.transaction([store], 'readonly').objectStore(store).getAll();
+      r.onsuccess = () => ok(r.result || []); r.onerror = () => ok([]);
+    });
+  }
+  async _bump(store, key, seed) {
+    const existing = await this._get(store, key);
+    await this._put(store, existing
+      ? { ...existing, hits: existing.hits + 1, lastSeen: Date.now() }
+      : { ...seed,     hits: 1,                 lastSeen: Date.now() });
+  }
+
+  /* ── SQL mini-parser ── */
+  _parse(sql) {
+    const s = sql.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ').trim();
+    const tables = [], joins = [], filters = [];
+    let m;
+
+    // FROM <table>
+    const fromRe = /FROM\s+[`"]?([\w]+)[`"]?/gi;
+    while ((m = fromRe.exec(s)) !== null) {
+      const t = m[1].toLowerCase();
+      if (!tables.includes(t)) tables.push(t);
+    }
+
+    // JOIN <table> ON a.col = b.col
+    const joinRe = /JOIN\s+[`"]?([\w]+)[`"]?(?:\s+(?:AS\s+)?[\w]+)?\s+ON\s+([`"\w.]+)\s*=\s*([`"\w.]+)/gi;
+    while ((m = joinRe.exec(s)) !== null) {
+      const jt = m[1].toLowerCase();
+      if (!tables.includes(jt)) tables.push(jt);
+      const l = m[2].replace(/[`"]/g, '').toLowerCase().split('.');
+      const r = m[3].replace(/[`"]/g, '').toLowerCase().split('.');
+      if (l.length === 2 && r.length === 2)
+        joins.push({ fromTable: l[0], fromCol: l[1], toTable: r[0], toCol: r[1] });
+    }
+
+    // WHERE col = 'val' / col = val
+    const wm = /WHERE\s+([\s\S]+?)(?:\s+(?:ORDER|GROUP|HAVING|LIMIT)\b|$)/i.exec(s);
+    if (wm) {
+      const condRe = /(?:([\w]+)\.)?([\w]+)\s*=\s*(?:'([^']*)'|"([^"]*)"|([\d.]+))/g;
+      while ((m = condRe.exec(wm[1])) !== null) {
+        const tbl = (m[1] || tables[0] || '').toLowerCase();
+        const col = m[2].toLowerCase();
+        const val = (m[3] ?? m[4] ?? m[5] ?? '').toLowerCase();
+        if (col && val && col.length < 50 && val.length < 80)
+          filters.push({ table: tbl, col, val });
+      }
+    }
+    return { tables, joins, filters };
+  }
+
+  /* ── Public API ── */
+  async trackTable(name) {
+    await this._ready;
+    if (!name) return;
+    const n = name.toLowerCase();
+    await this._bump('table_hits', n, { name: n });
+  }
+
+  async trackQuery(sql) {
+    await this._ready;
+    if (!sql || sql.trim().length < 5) return;
+    const { tables, joins, filters } = this._parse(sql);
+    for (const t of tables)  await this._bump('table_hits',     t,                              { name: t });
+    for (const j of joins)   await this._bump('join_patterns',  `${j.fromTable}.${j.fromCol}→${j.toTable}.${j.toCol}`, { key: `${j.fromTable}.${j.fromCol}→${j.toTable}.${j.toCol}`, ...j });
+    for (const f of filters) await this._bump('filter_patterns', `${f.table}.${f.col}:${f.val}`, { key: `${f.table}.${f.col}:${f.val}`, ...f });
+    if (tables.length && this._db) {
+      await new Promise(ok => {
+        const s = this._db.transaction(['recent_queries'], 'readwrite').objectStore('recent_queries');
+        s.put({ table: tables[0], sql: sql.trim(), ts: Date.now() }).onsuccess = ok;
+      }).catch(() => {});
+      // Prune to 100 entries
+      const all = await this._all('recent_queries');
+      if (all.length > 100) {
+        const tx = this._db.transaction(['recent_queries'], 'readwrite');
+        const st = tx.objectStore('recent_queries');
+        all.sort((a, b) => a.id - b.id).slice(0, all.length - 100).forEach(r => st.delete(r.id));
+      }
+    }
+  }
+
+  async topTables(n = 6) {
+    await this._ready;
+    return (await this._all('table_hits')).sort((a, b) => b.hits - a.hits).slice(0, n);
+  }
+  async joinPatterns(n = 5) {
+    await this._ready;
+    return (await this._all('join_patterns')).sort((a, b) => b.hits - a.hits).slice(0, n);
+  }
+  async commonFilters(table, n = 5) {
+    await this._ready;
+    const all = await this._all('filter_patterns');
+    return (table ? all.filter(f => f.table === table) : all).sort((a, b) => b.hits - a.hits).slice(0, n);
+  }
+  async recentQueries(table, n = 3) {
+    await this._ready;
+    if (!this._db) return [];
+    return new Promise(ok => {
+      const idx = this._db.transaction(['recent_queries'], 'readonly')
+                          .objectStore('recent_queries').index('byTable');
+      const req = idx.openCursor(IDBKeyRange.only(table), 'prev');
+      const seen = new Set(), out = [];
+      req.onsuccess = e => {
+        const c = e.target.result;
+        if (c && out.length < n) {
+          if (!seen.has(c.value.sql)) { seen.add(c.value.sql); out.push(c.value); }
+          c.continue();
+        } else ok(out);
+      };
+      req.onerror = () => ok([]);
+    });
+  }
+  async clear() {
+    await this._ready;
+    for (const s of ['table_hits','join_patterns','filter_patterns','recent_queries'])
+      if (this._db) this._db.transaction([s], 'readwrite').objectStore(s).clear();
+  }
+}
+const brain = new FluxBrain();
+
+/* ── Brain panel rendering ── */
+let _brainOpen = false;
+
+function _brainAge(ts) {
+  const d = Date.now() - ts;
+  if (d < 60_000)    return 'just now';
+  if (d < 3_600_000)  return `${Math.floor(d / 60_000)}m ago`;
+  if (d < 86_400_000) return `${Math.floor(d / 3_600_000)}h ago`;
+  return `${Math.floor(d / 86_400_000)}d ago`;
+}
+function _brainTrunc(s, n) { return s.length > n ? s.slice(0, n) + '…' : s; }
+function _brainFocusTable() {
+  const sql = document.getElementById('query-input')?.value || '';
+  const m = /FROM\s+[`"]?([\w]+)[`"]?/i.exec(sql);
+  return m ? m[1].toLowerCase() : null;
+}
+
+async function renderBrainPanel() {
+  const body = document.getElementById('brain-body');
+  if (!body) return;
+  const focus = _brainFocusTable();
+  const [topTables, joinPats, filters, recentQs] = await Promise.all([
+    brain.topTables(6),
+    brain.joinPatterns(5),
+    brain.commonFilters(focus, 5),
+    focus ? brain.recentQueries(focus, 3) : Promise.resolve([]),
+  ]);
+  let html = '';
+
+  if (topTables.length) {
+    const maxH = topTables[0].hits || 1;
+    html += `<div class="brain-section"><div class="brain-section-title">Most Visited</div>`;
+    for (const t of topTables) {
+      const pct = Math.round((t.hits / maxH) * 100);
+      html += `<div class="brain-table-row">
+        <span class="brain-table-name" title="${esc(t.name)}">${esc(t.name)}</span>
+        <div class="brain-bar-wrap"><div class="brain-bar" style="width:${pct}%"></div></div>
+        <span class="brain-count">${t.hits}</span>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  if (joinPats.length) {
+    html += `<div class="brain-section"><div class="brain-section-title">Common JOINs</div>`;
+    for (const j of joinPats) {
+      const ins = `JOIN ${j.toTable} ON ${j.fromTable}.${j.fromCol} = ${j.toTable}.${j.toCol}`;
+      html += `<div class="brain-join-row" data-insert="${esc(ins)}" title="Click to insert into editor">
+        <div class="brain-join-main">
+          <span class="brain-tag" title="${esc(j.fromTable)}">${esc(j.fromTable)}</span>
+          <span class="brain-join-arrow">→</span>
+          <span class="brain-tag" title="${esc(j.toTable)}">${esc(j.toTable)}</span>
+          <span class="brain-hit-badge">${j.hits}×</span>
+        </div>
+        <div class="brain-join-on">on <code>${esc(j.fromTable)}.${esc(j.fromCol)}</code> = <code>${esc(j.toTable)}.${esc(j.toCol)}</code></div>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  if (filters.length) {
+    const lbl = focus ? `Filters · ${focus}` : 'Common Filters';
+    html += `<div class="brain-section"><div class="brain-section-title">${esc(lbl)}</div>`;
+    for (const f of filters) {
+      const ins = `WHERE ${f.col} = '${f.val}'`;
+      html += `<div class="brain-filter-row" data-insert="${esc(ins)}" title="Click to insert">
+        <span class="brain-filter-col">${esc(f.col)}</span>
+        <span class="brain-filter-eq">=</span>
+        <span class="brain-filter-val" title="${esc(f.val)}">'${esc(_brainTrunc(f.val, 14))}'</span>
+        <span class="brain-hit-badge">${f.hits}×</span>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  if (recentQs.length) {
+    html += `<div class="brain-section"><div class="brain-section-title">Recent · ${esc(focus || '')}</div>`;
+    for (const q of recentQs) {
+      html += `<div class="brain-query-row" data-insert="${q.sql.replace(/"/g, '&quot;').replace(/'/g, '&#39;')}" title="Click to restore query">
+        <div class="brain-query-sql">${esc(_brainTrunc(q.sql, 140))}</div>
+        <div class="brain-query-age">${_brainAge(q.ts)}</div>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  if (!html) html = `<div class="brain-empty">Run queries to build context.<br>Patterns appear here automatically.</div>`;
+  html += `<button class="brain-clear-link" id="brain-clear-btn">Clear memory</button>`;
+
+  body.innerHTML = html;
+
+  body.querySelectorAll('[data-insert]').forEach(el => {
+    el.addEventListener('click', () => {
+      const editor = document.getElementById('query-input');
+      if (!editor) return;
+      const txt = el.dataset.insert;
+      editor.value = editor.value ? editor.value.trimEnd() + '\n' + txt : txt;
+      editor.focus();
+    });
+  });
+  document.getElementById('brain-clear-btn')?.addEventListener('click', async () => {
+    if (!confirm('Clear all session memory?')) return;
+    await brain.clear();
+    renderBrainPanel();
+    toast('Session memory cleared', 'info');
+  });
+}
+
+function _toggleBrain(forceOpen) {
+  const panel = document.getElementById('brain-panel');
+  const btn   = document.getElementById('btn-toggle-brain');
+  if (!panel) return;
+  _brainOpen = forceOpen !== undefined ? forceOpen : !_brainOpen;
+  panel.style.display = _brainOpen ? 'flex' : 'none';
+  if (btn) btn.classList.toggle('active', _brainOpen);
+  if (_brainOpen) renderBrainPanel();
+}
+
+document.getElementById('btn-toggle-brain')?.addEventListener('click', () => _toggleBrain());
+document.getElementById('brain-close-btn')?.addEventListener('click', () => _toggleBrain(false));
+
 (async () => {
   try {
     currentUser = await api('GET', '/auth/me');
@@ -651,6 +939,7 @@ function deleteDatabase(id, name) {
    ════════════════════════════════════════════════════════════════════════════ */
 async function openRecords(dbId) {
   currentDb = await api('GET', `/databases/${dbId}`);
+  brain.trackTable(currentDb.id || currentDb.name);
   document.getElementById('records-db-name').textContent = currentDb.name;
   const isGuest = currentUser.role === 'guest';
   document.getElementById('btn-add-record').style.display = isGuest ? 'none' : '';
@@ -1969,6 +2258,13 @@ async function runQuery() {
   try {
     const data = await api('POST', '/query', { sql });
     renderQueryResults(resultsEl, data);
+    brain.trackQuery(sql).then(() => {
+      if (_brainOpen) renderBrainPanel();
+      else {
+        const dot = document.getElementById('brain-dot');
+        if (dot) { dot.classList.remove('pulsing'); void dot.offsetWidth; dot.classList.add('pulsing'); }
+      }
+    });
   } catch (err) {
     resultsEl.innerHTML = `
       <div class="query-error-box">

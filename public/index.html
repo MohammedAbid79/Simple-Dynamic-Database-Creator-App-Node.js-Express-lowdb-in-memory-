@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FluxDB</title>
   <link rel="stylesheet" href="/fonts/inter.css" />
-  <link rel="stylesheet" href="/style.css?v=36" />
+  <link rel="stylesheet" href="/style.css?v=37" />
 </head>
 <body>
   <!-- ── App Shell ── -->
@@ -544,8 +544,16 @@
             <span class="query-badge-sep">+</span>
             <span class="query-badge query-badge-fluent">Fluent</span>
           </div>
+          <button id="btn-toggle-brain" class="btn btn-ghost btn-sm brain-toggle-btn" title="Session Memory — tracks your query patterns">
+            <span class="brain-dot" id="brain-dot"></span>
+            <svg class="bi" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M9.5 2a5.5 5.5 0 0 0-5 7.78L3 17l7.5-1.5A5.5 5.5 0 1 0 9.5 2z"/>
+              <path d="M9.5 6v4l2 2"/>
+            </svg>
+            Memory
+          </button>
         </div>
-        <div class="query-layout">
+        <div class="query-layout" id="query-layout">
           <!-- Schema sidebar -->
           <div class="schema-panel" id="query-schema">
             <div class="schema-panel-hd">
@@ -577,6 +585,23 @@
             </div>
             <div id="query-results" class="query-results-wrap">
               <div class="query-empty-state"><span>Write a query above and press <strong>Run</strong> to see results.</span></div>
+            </div>
+          </div>
+
+          <!-- Brain panel (Session Memory) -->
+          <div class="brain-panel" id="brain-panel" style="display:none">
+            <div class="brain-panel-hd">
+              <div class="brain-panel-title">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M9.5 2a5.5 5.5 0 0 0-5 7.78L3 17l7.5-1.5A5.5 5.5 0 1 0 9.5 2z"/>
+                  <path d="M9.5 6v4l2 2"/>
+                </svg>
+                Session Memory
+              </div>
+              <button class="brain-close-btn" id="brain-close-btn" aria-label="Close memory panel">×</button>
+            </div>
+            <div class="brain-panel-body" id="brain-body">
+              <div class="brain-empty">Run queries to start building context.<br>Patterns appear here automatically.</div>
             </div>
           </div>
         </div>
@@ -739,6 +764,6 @@
     </div>
   </div>
 
-  <script src="/app.js?v=29"></script>
+  <script src="/app.js?v=30"></script>
 </body>
 </html>
